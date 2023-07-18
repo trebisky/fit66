@@ -1,4 +1,13 @@
 /* read a Garmin FIT file
+ *  from my Garmin 66i
+ *
+ * This is NOT a general FIT file reader.
+ * There are lots of other possible record types and
+ * field types.  I have only implemented those things
+ * that I have seen in the files from my Garmin 66i
+ *
+ * So this solves problems for me.  You may find it useful
+ * if you want to learn about the FIT file format.
  *
  * Tom Trebisky  7-17-2023
  *
