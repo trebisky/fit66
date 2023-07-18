@@ -54,13 +54,14 @@ appear in the files from my Garmin 66i.
 The actual file I am using to test and develop this program has
 the following structure:
 
--Header
--file ID message
--file creator message
--device info message
--record messages (1175 of them)
--event messages (2 of them)
--lap message
--session message
--activity message
--CRC (2 bytes)
+- Header
+- file ID message
+- file creator message
+- device info message
+- record messages (1175 of them)
+- event messages (2 of them)
+- lap message
+- session message
+- activity message
+- CRC (2 bytes)
+
