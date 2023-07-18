@@ -37,7 +37,7 @@ A new description record can pop up at any time, indicating that
 a different sort of message follows.
 
 The first pair of records is the description/data pair for what they
-call a "file ID" message.  After that, who knows.
+call a "file ID" message.  After that, anything goes.
 
 In the files I have looked at, the bulk of the file is what they call
 "record" messages.  These are points along the track I recorded with
@@ -48,3 +48,19 @@ There are also "event" messages, which may be interesting also.
 
 General FIT files have lots of fitness related stuff that does not
 appear in the files from my Garmin 66i.
+
+---------------------
+
+The actual file I am using to test and develop this program has
+the following structure:
+
+-Header
+-file ID message
+-file creator message
+-device info message
+-record messages (1175 of them)
+-event messages (2 of them)
+-lap message
+-session message
+-activity message
+-CRC (2 bytes)
