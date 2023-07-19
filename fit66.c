@@ -136,6 +136,7 @@ global_lookup ( int gid )
  */
 
 int fit_fd;
+int record_count;
 
 int
 peek1 ( void )
@@ -153,12 +154,31 @@ peek1 ( void )
 int
 read1 ( void )
 {
-	int n;
 	u8 cbuf;
 
-	n = read ( fit_fd, &cbuf, 1 );
+	(void) read ( fit_fd, &cbuf, 1 );
 
 	return cbuf;
+}
+
+int
+read2 ( void )
+{
+	u16 sbuf;
+
+	(void) read ( fit_fd, &sbuf, 2 );
+
+	return sbuf;
+}
+
+int
+read4 ( void )
+{
+	u32 ibuf;
+
+	(void) read ( fit_fd, &ibuf, 4 );
+
+	return ibuf;
 }
 
 void
@@ -250,8 +270,9 @@ definition_record ( void )
 
 	/* This header ID is just a sequential count 0, 1, ... */
 	id = dhdr.header & H_ID;
-	printf ( "Definition record, header = 0x%02x, header id = %d\n", dhdr.header, id );
 
+	printf ( "\n" );
+	printf ( "Definition record, header = 0x%02x, header id = %d\n", dhdr.header, id );
 
 	gp = global_lookup ( dhdr.g_id );
 	if ( ! gp ) {
@@ -331,6 +352,80 @@ definition_record ( void )
 
  */
 
+struct data {
+	double lon;
+	double lat;
+	double alt;
+};
+
+struct data data[2000];
+int ndata = 0;
+
+#define LAT_ID	0
+#define LON_ID	1
+#define ALT_ID	78
+
+/* Garmin uses an angular unit the call "semicircles".
+ * The basic idea is that 2*pi radians uses all of the 32 bit resolution.
+ * So pi radians is 0x80000000
+ * angleInSemicircles = (angleInRadians * 0x80000000) / PI
+ * degrees = semicircles * (180 / 2^31)
+ */
+
+double
+cc2deg ( int cc_val )
+{
+	double rv;
+	double div = 0x80000000;
+
+	rv = cc_val;
+	rv /= div;
+	return rv * 180.0;
+}
+
+void
+decode ( struct definition *dp )
+{
+	int i;
+	struct field *fp;
+	int val;
+	int lon = 99;
+	int lat = 88;
+	double alt;
+
+	for ( i=0; i<dp->nf; i++ ) {
+	    fp = &dp->field[i];
+	    if ( fp->size == 1 )
+		val = read1 ();
+	    else if ( fp->size == 2 )
+		val = read2 ();
+	    else if ( fp->size == 4 )
+		val = read4 ();
+	    else
+		oops ( "Turkey riot" );
+
+	    if ( fp->id == LAT_ID )
+		lat = val;
+	    if ( fp->id == LON_ID )
+		lon = val;
+	    if ( fp->id == ALT_ID )
+		alt = val;
+	}
+
+	alt = alt/5.0 - 500.0;
+	alt *= 3.280839895;
+
+	// printf ( "lon = %08x, %d\n", lon, lon );
+	// printf ( "lat = %08x, %d\n", lat, lat );
+
+	// printf ( "   lon, lat, alt = %.5f %.5f %.2f\n", cc2deg(lon), cc2deg(lat), alt );
+
+	data[ndata].lon = cc2deg(lon);
+	data[ndata].lat = cc2deg(lat);
+	data[ndata].alt = alt;
+	ndata++;
+}
+
 int
 data_record ( struct definition *dp )
 {
@@ -341,9 +436,16 @@ data_record ( struct definition *dp )
 
 	header = read1 ();
 	id = header & H_ID;
-	printf ( "Data record, header id = %d (%d bytes)\n", id, dp->size  );
 
-	readn ( buf, dp->size );
+	/* Don't show all 1175 records */
+	if ( dp->size == 40 ) {
+	    record_count++;
+	    decode ( dp );
+	} else {
+	    printf ( "Data record, header id = %d (%d bytes)\n", id, dp->size  );
+	    readn ( buf, dp->size );
+	}
+
 
 	return 1 + dp->size;
 }
@@ -359,17 +461,20 @@ record ( void )
 	// n = read ( fd, &header, 1 );
 	header = peek1 ();
 
-	printf ( "\n" );
-	printf ( "Record header: 0x%02x\n", header );
+	// printf ( "\n" );
+	// printf ( "Record header: 0x%02x\n", header );
 
 	if ( header & H_COMP ) {
 	    printf ( "Compressed record\n" );
 	    oops ( "Not ready for compressed records" );
 	} else if ( header & H_DEF ) {
-	    printf ( "Definition record\n" );
+	    if ( record_count )
+		printf ( " %d data records (not shown)\n", record_count );
+	    // printf ( "Definition record\n" );
 	    nn = definition_record ();
+	    record_count = 0;
 	} else {
-	    printf ( "Data record\n" );
+	    // printf ( "Data record\n" );
 	    nn = data_record ( &def );
 	}
 
@@ -413,8 +518,8 @@ header ( void )
 	return hdr.f_len;
 }
 
-int
-main ( int argc, char **argv )
+void
+read_file ( void )
 {
 	int fd;
 	int nio;
@@ -430,7 +535,7 @@ main ( int argc, char **argv )
 	nio = header ();
 
 	while ( nio > 0 ) {
-	    printf ( "%d bytes left in file\n", nio );
+	    // printf ( "%d bytes left in file\n", nio );
 	    nrec = record ();
 	    nio -= nrec;
 	}
@@ -441,6 +546,34 @@ main ( int argc, char **argv )
 	}
 
 	printf ( "All done\n" );
+}
+
+int rec_num = -1;
+
+void
+out_cmd ( int n )
+{
+	struct data *dp;
+
+	dp = &data[n];
+	printf ( "MC %.5f %.5f\n", dp->lon, dp->lat );
+}
+
+int
+main ( int argc, char **argv )
+{
+	argc--;
+	argv++;
+
+	read_file ();
+
+	while ( argc-- ) {
+	    rec_num = atoi ( *argv );
+	    printf ( "Record %d\n", rec_num );
+	    out_cmd ( rec_num );
+	    argv++;
+	}
+
 	return 0;
 }
 

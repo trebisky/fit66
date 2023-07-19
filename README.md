@@ -54,7 +54,7 @@ appear in the files from my Garmin 66i.
 The actual file I am using to test and develop this program has
 the following structure:
 
-- Header
+- Header (16 bytes)
 - file ID message
 - file creator message
 - device info message
