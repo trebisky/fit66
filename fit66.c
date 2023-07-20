@@ -54,6 +54,12 @@ typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
 
+/* Some global variables.
+ */
+int fit_fd;
+int record_count;
+int dump_level = 0;
+
 /* We get a 16 byte thing without the packed attribute */
 /* We want 14 bytes */
 
@@ -136,9 +142,6 @@ global_lookup ( int gid )
  * rather than pass "fd" all around, we call these.
  * also implement a 1 byte peek.
  */
-
-int fit_fd;
-int record_count;
 
 int
 peek1 ( void )
@@ -246,14 +249,14 @@ wgs84 ( double dlat, double *long_fpd, double *lat_fpd )
 	div2 = sqrt ( dd );
 	div1 = dd * div2;
 
-	// div1 = pow ( (1.0 - ee *sin(lat)), 1.5);
-	// div2 = pow ( (1.0 - ee *sin(lat)), 0.5);
+	// div1 = pow ( (1.0 - ee *sin(lat)**2), 1.5);
+	// div2 = pow ( (1.0 - ee *sin(lat)**2), 0.5);
 
 	m = a*(1.0 - ee) / div1;	// meridian radius of curvature
 	r = a*cos(lat) / div2;		// curvature of parallels
 
-	/* To get a one degree increment
-	 * ?? why -- but it works --
+	/* To get a one degree increment.
+	 * Apparently the above values are the for a radian of curvature.
 	 */
 	m *= d2r;
 	r *= d2r;
@@ -305,8 +308,11 @@ check_crc ( void )
 		break;
 	    crc = fit_crc16 ( data, crc );
 	}
-	printf ( "CRC for entire file: %04x\n", crc );
+	if ( dump_level > 1 )
+	    printf ( "CRC for entire file: %04x\n", crc );
+
 	lseek ( fit_fd, 0, SEEK_SET );
+
 	if ( crc )
 	    oops ( "Bad file CRC" );
 }
@@ -319,7 +325,8 @@ check_header_crc ( u8 *h, int size )
 
 	for ( i=0; i<size; i++ )
 	    crc = fit_crc16 ( h[i], crc );
-	printf ( "CRC for header: %04x\n", crc );
+	if ( dump_level > 1 )
+	    printf ( "CRC for header: %04x\n", crc );
 	if ( crc )
 	    oops ( "Bad header CRC" );
 }
@@ -359,8 +366,10 @@ definition_record ( void )
 	/* This header ID is just a sequential count 0, 1, ... */
 	id = dhdr.header & H_ID;
 
-	printf ( "\n" );
-	printf ( "Definition record, header = 0x%02x, header id = %d\n", dhdr.header, id );
+	if ( dump_level > 1 ) {
+	    printf ( "\n" );
+	    printf ( "Definition record, header = 0x%02x, header id = %d\n", dhdr.header, id );
+	}
 
 	gp = global_lookup ( dhdr.g_id );
 	if ( ! gp ) {
@@ -368,7 +377,8 @@ definition_record ( void )
 	    oops ( "Alligator attack" );
 	}
 
-	printf ( "Definition record, global ID = %d -- %s\n", dhdr.g_id, gp->name );
+	if ( dump_level > 1 )
+	    printf ( "Definition record, global ID = %d -- %s\n", dhdr.g_id, gp->name );
 
 	// printf ( "Sizeof field: %d\n", sizeof(struct field) );
 	nf = dhdr.nf;
@@ -377,7 +387,8 @@ definition_record ( void )
 	for ( i=0; i<nf; i++ ) {
 	    // n = read ( fd, &ff, sizeof(struct field) );
 	    readn ( (u8 *) &ff, sizeof(struct field) );
-	    printf ( "-- Field: %d, id, size, type = %d %d %d(0x%02x)\n", i, ff.id, ff.size, ff.type, ff.type );
+	    if ( dump_level > 1 )
+		printf ( "-- Field: %d, id, size, type = %d %d %d(0x%02x)\n", i, ff.id, ff.size, ff.type, ff.type );
 	    size += ff.size;
 	    def.field[i] = ff;
 	}
@@ -392,16 +403,19 @@ definition_record ( void )
 	    // n = read ( fd, &nd, 1 );
 	    nd = read1 ();
 	    ndev += 1;
-	    printf ( "Developer fields = %d\n", nd );
+	    if ( dump_level > 1 )
+		printf ( "Developer fields = %d\n", nd );
 
 	    for ( i=0; i<nd; i++ ) {
 		readn ( (u8 *) &ff, sizeof(struct field) );
-		printf ( "-- Dev Field: %d, id, size, type = %d %d %d\n", i, ff.id, ff.size, ff.type );
+		if ( dump_level > 1 )
+		    printf ( "-- Dev Field: %d, id, size, type = %d %d %d\n", i, ff.id, ff.size, ff.type );
 	    }
 	    ndev += nd*sizeof(struct field);
 	}
 
-	printf ( " expected record size will be %d bytes\n", size );
+	if ( dump_level > 1 )
+	    printf ( " expected record size will be %d bytes\n", size );
 	def.size = size;
 
 	return sizeof(struct def_hdr) + nf*sizeof(struct field) + ndev;
@@ -530,7 +544,8 @@ data_record ( struct definition *dp )
 	    record_count++;
 	    decode ( dp );
 	} else {
-	    printf ( "Data record, header id = %d (%d bytes)\n", id, dp->size  );
+	    if ( dump_level > 1 )
+		printf ( "Data record, header id = %d (%d bytes)\n", id, dp->size  );
 	    readn ( buf, dp->size );
 	}
 
@@ -556,7 +571,7 @@ record ( void )
 	    printf ( "Compressed record\n" );
 	    oops ( "Not ready for compressed records" );
 	} else if ( header & H_DEF ) {
-	    if ( record_count )
+	    if ( dump_level > 1 && record_count )
 		printf ( " %d data records (not shown)\n", record_count );
 	    // printf ( "Definition record\n" );
 	    nn = definition_record ();
@@ -577,25 +592,28 @@ header ( void )
 	struct fit_header hdr;
 	int n;
 
-	printf ( "header size expected to be: %d\n", sizeof(struct fit_header) );
+	// printf ( "header size expected to be: %d\n", sizeof(struct fit_header) );
 
 	readn ( (u8 *)&hdr, sizeof(struct fit_header) );
 
-	if ( strncmp ( hdr.sig, ".FIT", 4 ) == 0 )
-	    printf ( "Signature is OK\n" );
-	else {
+	if ( strncmp ( hdr.sig, ".FIT", 4 ) == 0 ) {
+	    if ( dump_level > 1 )
+		printf ( "Signature is OK\n" );
+	} else {
 	    printf ( "Not a FIT file\n" );
 	    exit ( 2 );
 	}
 
 	check_header_crc ( (char *) &hdr, hdr.len );
 
-	printf ( "len = %d\n", hdr.len );
-	printf ( "ver = %d\n", hdr.prot_ver );
-	printf ( "ver = %d\n", hdr.prof_ver );
-	printf ( "f_len = %ld\n", hdr.f_len );		/* data length */
-	printf ( "sig = %.4s\n", hdr.sig );
-	printf ( "crc = %04x\n", hdr.crc );		/* CRC for header */
+	if ( dump_level > 1 ) {
+	    printf ( "len = %d\n", hdr.len );
+	    printf ( "ver = %d\n", hdr.prot_ver );
+	    printf ( "ver = %d\n", hdr.prof_ver );
+	    printf ( "f_len = %ld\n", hdr.f_len );	/* data length */
+	    printf ( "sig = %.4s\n", hdr.sig );
+	    printf ( "crc = %04x\n", hdr.crc );		/* CRC for header */
+	}
 
 	/* The file size is 48980 bytes.
 	 * F-len in the header is 48964
@@ -633,7 +651,15 @@ read_file ( void )
 	    oops ( "Buffalo stampede" );
 	}
 
-	printf ( "All done\n" );
+	// printf ( "All done\n" );
+	// printf ( "File read successfully: %d data points\n", ndata );
+}
+
+void
+dump_file ( void )
+{
+	dump_level = 2;
+	read_file ();
 }
 
 int rec_num = -1;
@@ -647,22 +673,40 @@ out_cmd ( int n )
 	printf ( "MC %.5f %.5f\n", dp->lon, dp->lat );
 }
 
+void
+show_data ( void )
+{
+	int i;
+	struct data *dp;
+
+	/* XXX - more columns soon */
+	for ( i=0; i<ndata; i++ ) {
+	    dp = &data[i];
+	    printf ( "%.5f %.5f\n", dp->lon, dp->lat );
+	}
+}
+
 int
 main ( int argc, char **argv )
 {
 	argc--;
 	argv++;
 
+	// dump_file ();
+
 	read_file ();
+	show_data ();
 
 	while ( argc-- ) {
 	    rec_num = atoi ( *argv );
 	    printf ( "Record %d\n", rec_num );
+
 	    out_cmd ( rec_num );
+
 	    argv++;
 	}
 
-	wgs_test ();
+	// wgs_test ();
 
 	return 0;
 }

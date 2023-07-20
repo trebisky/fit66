@@ -4,9 +4,20 @@ import wx
 import sys
 import os
 
+import subprocess
+from dataclasses import dataclass
+
 #import numpy as np
 #import datetime
 #import math
+
+# This will hold a list of Tdata objects
+data = []
+
+@dataclass
+class Tdata :
+        lat: str
+        long: str
 
 xsize = 800
 ysize = 600
@@ -180,7 +191,7 @@ class Main_Panel ( wx.Panel ) :
 
             self.text = wx.TextCtrl ( self, -1, style = wx.TE_PROCESS_ENTER )
             #self.text.SetInsertionPoint ( 0 )
-            self.text.SetValue ( int(self.counter) )
+            self.text.SetValue ( str(self.counter) )
 
             #self.text.Bind ( wx.EVT_TEXT, self.OnKeyTyped )
             #self.text.SetMaxLength(5)
@@ -205,12 +216,22 @@ class Main_Panel ( wx.Panel ) :
 
             self.update ()
 
+        def new_item ( self ) :
+            self.update ()
+            if self.counter < 1 :
+                return
+            if self.counter > len(data) :
+                return
+            d = data[self.counter-1]
+
+            print ( f"MC {d.long} {d.lat}" )
+
         def onEnter ( self, event ) :
             print ( "Enter typed" )
             val = self.text.GetValue()
             print ( val )
             self.counter = int(val)
-            self.update ()
+            self.new_item ()
 
         # Called by timer (or button)
         def update ( self ) :
@@ -226,11 +247,11 @@ class Main_Panel ( wx.Panel ) :
 
         def onLess ( self, event ) :
             self.counter -= 1
-            self.update ()
+            self.new_item ()
 
         def onMore ( self, event ) :
             self.counter += 1
-            self.update ()
+            self.new_item ()
 
 class GPS_Frame (wx.Frame):
  
@@ -277,6 +298,22 @@ class GPS_GUI ( wx.App ):
             frame = GPS_Frame ( None, "GPS Tool" )
             self.SetTopWindow ( frame )
             frame.Show ( True )
+
+# ------------------------------------
+
+def load_data () :
+        result = subprocess.run ( ['./fit66'], stdout=subprocess.PIPE )
+        stuff = result.stdout.decode('utf-8').splitlines()
+        for l in stuff :
+            #print ( l )
+            w = l.split ()
+            #t = Tdata ( float(w[0]), float(w[1]) )
+            t = Tdata ( w[0], w[1] )
+            data.append ( t )
+
+load_data ()
+
+# -------------
 
 app = GPS_GUI ()
 app.MainLoop()
