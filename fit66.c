@@ -19,6 +19,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <math.h>
+
 /* For htons and htonl
 #include <arpa/inet.h>
 */
@@ -187,6 +189,92 @@ readn ( u8 *buf, int nbuf )
 	int n;
 
 	n = read ( fit_fd, buf, nbuf );
+}
+
+/* ---------------------------------------------------------------------- */
+/* General geometry and math --
+ *
+ * Converting lat/long to miles (or feet, or meters)
+ * The earth is an ellipsoid.
+ * WGS84 is the model we use for it.
+ *
+ * At 38 degrees north (according to the USGS) :
+ *  1 degree of latitude is about 364,000 feet (69 miles)
+ *  1 degree of longitude is 288,200 feet (54.6 miles)
+ *
+ * In what follows, the "a" value (semi-major axis) is
+ *    the radius of the earth at the equator.
+ * At the pole, the distance is 6356752.3 meters
+ *    (a difference of 21384.7 meters (21.4 km))
+ *
+ * The following code gives:
+    38.0 degrees North latitude
+	long (fpd) = 288164.26
+	lat  (fpd) = 364161.71
+
+ */
+
+void
+wgs84 ( double dlat, double *long_fpd, double *lat_fpd )
+{
+	double a = 6378137.0;		// semi-major axis, meters
+	// double f;
+	// double flat;
+	double e, ee, es, ess;
+	double lat;
+	double m, r;
+	double mf, rf;
+	double dd, div1, div2;
+	double pi = 3.1415929;
+	double d2r = pi / 180.0;
+	double m2f = 3.28084;		// meters to feet
+
+	// dlat = 38.0;
+	// dlat = 0.0;
+
+	lat = dlat * d2r;
+	// flat = 298.257223563;	// flattening factor
+	// f = 1.0 / flat;
+
+	// e = sqrt(2f-f**2);
+	e = 0.081819191;		// eccentricity
+	ee = e * e;
+	es = e * sin(lat);
+	ess = es * es;
+
+	dd = 1.0 - ess;
+	div2 = sqrt ( dd );
+	div1 = dd * div2;
+
+	// div1 = pow ( (1.0 - ee *sin(lat)), 1.5);
+	// div2 = pow ( (1.0 - ee *sin(lat)), 0.5);
+
+	m = a*(1.0 - ee) / div1;	// meridian radius of curvature
+	r = a*cos(lat) / div2;		// curvature of parallels
+
+	/* To get a one degree increment
+	 * ?? why -- but it works --
+	 */
+	m *= d2r;
+	r *= d2r;
+
+	/* Convert to feet */
+	*lat_fpd = m * m2f;
+	*long_fpd = r * m2f;
+}
+
+void
+wgs_test ( void )
+{
+	double long_fpd;
+	double lat_fpd;
+	double dlat = 38.0;
+
+	wgs84 ( dlat, &long_fpd, &lat_fpd );
+
+	printf ( "%.1f degrees North latitude\n", dlat );
+	printf ( "long (fpd) = %.2f\n", long_fpd );
+	printf ( "lat  (fpd) = %.2f\n", lat_fpd );
 }
 
 /* ---------------------------------------------------------------------- */
@@ -573,6 +661,8 @@ main ( int argc, char **argv )
 	    out_cmd ( rec_num );
 	    argv++;
 	}
+
+	wgs_test ();
 
 	return 0;
 }

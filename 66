@@ -1,0 +1,284 @@
+#!/bin/python3
+
+import wx
+import sys
+import os
+
+#import numpy as np
+#import datetime
+#import math
+
+xsize = 800
+ysize = 600
+wsize = ( xsize, ysize )
+
+bogus = "          ---"
+
+# Some wx basics -- Panel versus Frame
+# --  a Frame is what most people think of as a "window".
+#  it has window manager decorations.  You usually have
+#  one Frame for a GUI, but a popup would be another Frame.
+# --  a Panel is a rectangular region within a frame that you
+#  use to layout widgets.
+# --  you use a hierarchy of sizers to lay out the GUI.
+#  you don't strictly need to have panels, but it is usually
+#  best.  A panel is required to handle a repaint request.
+
+# ----------------------------------------------------------------------------
+#
+# wxPython has some severe brain damage as far as greying out text when you move
+# the mouse out of the window.  They don't understand the concept that this is
+# an information display, not some active control with interaction.
+#
+# https://stackoverflow.com/questions/17764457/make-disabled-text-render-black
+#
+# I also want to center text inside an area of fixed size, so I may as well
+# dive in.  I am taking the code posted by Hesky Fisher in the above post.
+#
+#    Thanks Hesky !!
+
+class MyStaticText ( wx.Control ):
+    def __init__(self, parent, id=wx.ID_ANY, label="", 
+                 pos=wx.DefaultPosition, size=wx.DefaultSize, 
+                 style=0, validator=wx.DefaultValidator, 
+                 name="MyStaticText"):
+        wx.Control.__init__(self, parent, id, pos, size, style|wx.NO_BORDER, validator, name)
+
+        wx.Control.SetLabel(self, label)
+        self.InheritAttributes()
+        self.SetInitialSize(size)
+
+        self.bg_color = parent.GetBackgroundColour ()
+        self.fg_color = wx.BLACK
+
+        self.Bind(wx.EVT_PAINT, self.OnPaint)
+        self.Bind(wx.EVT_ERASE_BACKGROUND, self.OnEraseBackground)
+
+    def OnPaint(self, event):
+        dc = wx.BufferedPaintDC(self)
+        self.Draw(dc)
+
+    def Draw(self, dc):
+        width, height = self.GetClientSize()
+
+        if not width or not height:
+            return
+
+        # TJT - We should get the background of the parent instead
+        # backBrush = wx.Brush(wx.WHITE, wx.SOLID)
+        backBrush = wx.Brush ( self.bg_color, wx.SOLID)
+        dc.SetBackground(backBrush)
+        dc.Clear()
+
+        #dc.SetTextForeground(wx.BLACK)
+        dc.SetTextForeground ( self.fg_color )
+        dc.SetFont(self.GetFont())
+        label = self.GetLabel()
+        dc.DrawText(label, 0, 0)
+
+    def SetFGColour(self, colour):
+        self.fg_color = colour
+        self.Refresh()
+
+    def OnEraseBackground(self, event):
+        pass
+
+    def SetLabel(self, label):
+        wx.Control.SetLabel(self, label)
+        self.InvalidateBestSize()
+        self.SetSize(self.GetBestSize())
+        self.Refresh()
+
+    def SetFont(self, font):
+        wx.Control.SetFont(self, font)
+        self.InvalidateBestSize()
+        self.SetSize(self.GetBestSize())
+        self.Refresh()
+
+    def DoGetBestSize(self):
+        label = self.GetLabel()
+        font = self.GetFont()
+
+        if not font:
+            font = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
+
+        dc = wx.ClientDC(self)
+        dc.SetFont(font)
+
+        textWidth, textHeight = dc.GetTextExtent(label)
+        best = wx.Size(textWidth, textHeight)
+        self.CacheBestSize(best)
+        return best
+
+    def AcceptsFocus(self):
+        return False
+
+# Does not work.
+#    def SetForegroundColour(self, colour):
+#        wx.Control.SetForegroundColour(self, colour)
+#        self.Refresh()
+#
+#    def SetBackgroundColour(self, colour):
+#        wx.Control.SetBackgroundColour(self, colour)
+#        self.Refresh()
+
+    def GetDefaultAttributes(self):
+        return wx.StaticText.GetClassDefaultAttributes()
+
+    def ShouldInheritColours(self):
+        return True
+
+# Here is a handy wrapper on MyStaticText
+# I had trouble getting this right.
+# The trick is that the __init__ method does a special thing.
+# it effectively returns "self" in a magic way.
+# (and "self" is the value returned by the superclass.)
+
+class EZtext ( MyStaticText ) :
+        def __init__ ( self, parent, sizer, message ) :
+            #rv = MyStaticText.__init__ ( self, parent, wx.ID_ANY, message )
+            #sizer.Add ( rv, 1, wx.EXPAND )
+            #print ( rv )
+            #print ( type(rv) )
+
+            # prefix some space here
+            padded = "    " + message
+            MyStaticText.__init__ ( self, parent, wx.ID_ANY, padded )
+            sizer.Add ( self, 1, wx.EXPAND )
+
+        def SetLabel ( self, msg ) :
+            padded = "    " + msg
+            super().SetLabel ( padded )
+
+# ----------------------------------------------------------------------------
+# Above here is "standard library" stuff I use in many projects.
+# Below here is the "66" (Garmin 66i) application
+
+# Check every second for new data
+timer_delay = 1000    # milliseconds
+
+#the_counter = 0
+
+class Main_Panel ( wx.Panel ) :
+        def __init__ ( self, parent ) :
+            wx.Panel.__init__ ( self, parent )
+
+            self.counter = 1
+
+            #self.SetBackgroundColour ( wx.GREEN )
+
+            #rsz = wx.BoxSizer ( wx.VERTICAL )
+            #self.SetSizer ( rsz )
+
+            #bup = wx.Panel ( self, -1 )
+
+            #bu_sizer = wx.BoxSizer ( wx.HORIZONTAL )
+            bu_sizer = wx.BoxSizer ( wx.VERTICAL )
+
+            EZtext ( self, bu_sizer, " " )
+            self.display = EZtext ( self, bu_sizer, bogus )
+
+            self.text = wx.TextCtrl ( self, -1, style = wx.TE_PROCESS_ENTER )
+            #self.text.SetInsertionPoint ( 0 )
+            self.text.SetValue ( int(self.counter) )
+
+            #self.text.Bind ( wx.EVT_TEXT, self.OnKeyTyped )
+            #self.text.SetMaxLength(5)
+            #self.text.Bind ( wx.EVT_TEXT_MAXLEN, self.OnMaxLen )
+            self.text.Bind ( wx.EVT_TEXT_ENTER, self.onEnter )
+
+            bu_sizer.Add ( self.text, 1, wx.EXPAND )
+
+            self.b_less = wx.Button ( self, wx.ID_ANY, "Less")
+            self.b_less.Bind ( wx.EVT_BUTTON, self.onLess )
+
+            self.b_more = wx.Button ( self, wx.ID_ANY, "More")
+            self.b_more.Bind ( wx.EVT_BUTTON, self.onMore )
+
+            self.b_ex = wx.Button ( self, wx.ID_ANY, "Exit")
+            self.b_ex.Bind ( wx.EVT_BUTTON, self.onExit )
+
+            bu_sizer.Add ( self.b_less, 1, wx.EXPAND )
+            bu_sizer.Add ( self.b_more, 1, wx.EXPAND )
+            bu_sizer.Add ( self.b_ex, 1, wx.EXPAND )
+            self.SetSizer ( bu_sizer )
+
+            self.update ()
+
+        def onEnter ( self, event ) :
+            print ( "Enter typed" )
+            val = self.text.GetValue()
+            print ( val )
+            self.counter = int(val)
+            self.update ()
+
+        # Called by timer (or button)
+        def update ( self ) :
+
+            msg = str ( self.counter )
+            self.display.SetLabel ( msg )
+
+        # Tkinter was always a pain in the ass wanting you
+        # to call a destroy method and spewing out weird messages
+        # whatever you did. wxPython just works nicely if you do this.
+        def onExit ( self, event ) :
+            sys.exit ()
+
+        def onLess ( self, event ) :
+            self.counter -= 1
+            self.update ()
+
+        def onMore ( self, event ) :
+            self.counter += 1
+            self.update ()
+
+class GPS_Frame (wx.Frame):
+ 
+        def __init__ ( self, parent, title ):
+            wx.Frame.__init__(self, None, wx.ID_ANY, title )
+            #wx.Frame.__init__(self, None, wx.ID_ANY, title, size=wsize )
+            #top = wx.Frame.__init__(self, None, wx.ID_ANY, title, pos=(a,b), size=wsize )
+
+            #self.data = data
+
+            #splitter = wx.SplitterWindow ( self, -1 )
+            #splitter = wx.SplitterWindow(self, style = wx.SP_LIVE_UPDATE)
+
+            #self.lpanel = Left_Panel ( splitter, data )
+            #self.rpanel = Right_Panel ( splitter, data, self.lpanel )
+
+            # only left side grows
+            #splitter.SetSashGravity ( 1.0 )
+
+            #splitter.SetMinimumPaneSize ( right_size )
+            #splitter.SplitVertically ( self.lpanel, self.rpanel )
+            #splitter.SetSashPosition ( split_pos, True )
+
+            self.panel = Main_Panel ( self )
+#
+            self.timer = wx.Timer ( self )
+            self.Bind ( wx.EVT_TIMER, self.timer_update, self.timer )
+            self.timer.Start ( timer_delay )
+
+        # Called at 1 Hz
+        def timer_update ( self, event ) :
+            pass
+            #global the_counter
+
+            #print ( "Tick" )
+            #the_counter += 1
+            #print ( the_counter )
+
+            #self.panel.update ()
+
+class GPS_GUI ( wx.App ):
+        def __init__ ( self ) :
+            wx.App.__init__(self)
+            frame = GPS_Frame ( None, "GPS Tool" )
+            self.SetTopWindow ( frame )
+            frame.Show ( True )
+
+app = GPS_GUI ()
+app.MainLoop()
+
+# THE END
