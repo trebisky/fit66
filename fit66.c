@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <time.h>
 #include <math.h>
 
 /* For htons and htonl
@@ -455,17 +456,18 @@ definition_record ( void )
  */
 
 struct data {
+	u32	time;
 	double lon;
 	double lat;
 	double alt;
+	double temp;
+	double speed;
+	double distance;
 };
 
+/* XXX - bogus limit on points */
 struct data data[2000];
 int ndata = 0;
-
-#define LAT_ID	0
-#define LON_ID	1
-#define ALT_ID	78
 
 /* Garmin uses an angular unit the call "semicircles".
  * The basic idea is that 2*pi radians uses all of the 32 bit resolution.
@@ -485,15 +487,56 @@ cc2deg ( int cc_val )
 	return rv * 180.0;
 }
 
+/* Offset in seconds from the unix epoch
+ */
+#define	FIT_OFFSET	631065600
+
+/* This yields: Thu Jul 13 03:24:47 2023
+ * (which is 5 words
+ * strftime would allow any format,
+ *  as well as not getting the newline
+ */
+char *
+tstamp ( u32 gtime )
+{
+	time_t	tt;
+	struct tm *tp;
+	static char cbuf[64];
+
+	// time_t is an 8 byte thing
+	// printf ( "Sizeof time = %d\n", sizeof(time_t) );
+	tt = gtime;
+	tt += FIT_OFFSET;
+	tp = localtime ( &tt );
+	// printf ( "Time: %s\n", asctime ( tp ) );
+	// return asctime ( tp );
+	strcpy ( cbuf,  asctime ( tp ) );
+	// printf ( "Cbuf = %s %d\n", cbuf, strlen(cbuf) );
+	cbuf[strlen(cbuf)-1] = '\0';
+	return cbuf;
+}
+
+/* ID values --
+ *  2 (altitude) is always 0xffff - use 78 instead
+ *  3 (heart rate) is always 0xff - I ain't got no sensor
+ *  4 (cadence) is always 0xff
+ *  6 (speed) is always 0xffff - use 73 instead
+ *  14 is always 0xffffffff
+ *  15 is always 0xffffffff
+ *  53 (fract cadence) is always 0xff
+ */
+
 void
 decode ( struct definition *dp )
 {
 	int i;
 	struct field *fp;
 	int val;
-	int lon = 99;
-	int lat = 88;
+	int lon;
+	int lat;
+	u32 time;
 	double alt;
+	double temp, speed, dist;
 
 	for ( i=0; i<dp->nf; i++ ) {
 	    fp = &dp->field[i];
@@ -506,25 +549,59 @@ decode ( struct definition *dp )
 	    else
 		oops ( "Turkey riot" );
 
+	    // printf ( "%d %5d %d %02x = %d\n", i, fp->id, fp->size, fp->type, val );
+
+#define TS_ID		253
+#define LAT_ID		0
+#define LON_ID		1
+#define ALT_ID		78
+#define TEMP_ID		13
+#define SPEED_ID	73
+#define DIST_ID		5
+
+#define M2F	3.280839895
+
+	    // if ( fp->id == 53 )
+	    // 	printf ( "53 = %08x\n", val );
+
+	    if ( fp->id == TS_ID )
+		time = val;
 	    if ( fp->id == LAT_ID )
 		lat = val;
 	    if ( fp->id == LON_ID )
 		lon = val;
 	    if ( fp->id == ALT_ID )
 		alt = val;
+	    if ( fp->id == TEMP_ID )
+		temp = val * 1.8 + 32.0;
+	    if ( fp->id == SPEED_ID )
+		speed = val / 1000.0;
+	    if ( fp->id == DIST_ID )
+		dist = val / 100.0;
 	}
 
 	alt = alt/5.0 - 500.0;
-	alt *= 3.280839895;
+	alt *= M2F;
+
+	/* Convert from m/s to miles/hour */
+	speed *= 2.23694;
+
+	/* Convert meters to miles */
+	dist *= M2F;
+	dist /= 5280.0;
 
 	// printf ( "lon = %08x, %d\n", lon, lon );
 	// printf ( "lat = %08x, %d\n", lat, lat );
 
 	// printf ( "   lon, lat, alt = %.5f %.5f %.2f\n", cc2deg(lon), cc2deg(lat), alt );
 
+	data[ndata].time = time;
 	data[ndata].lon = cc2deg(lon);
 	data[ndata].lat = cc2deg(lat);
 	data[ndata].alt = alt;
+	data[ndata].temp = temp;
+	data[ndata].speed = speed;
+	data[ndata].distance = dist;
 	ndata++;
 }
 
@@ -673,16 +750,28 @@ out_cmd ( int n )
 	printf ( "MC %.5f %.5f\n", dp->lon, dp->lat );
 }
 
+/*
+struct data {
+	u32	time;
+	double lon;
+	double lat;
+	double alt;
+	double temp;
+	double speed;
+	double distance;
+};
+*/
+
 void
 show_data ( void )
 {
 	int i;
 	struct data *dp;
 
-	/* XXX - more columns soon */
 	for ( i=0; i<ndata; i++ ) {
 	    dp = &data[i];
-	    printf ( "%.5f %.5f\n", dp->lon, dp->lat );
+	    printf ( "%s %.5f %.5f %.2f %.1f %.1f %.1f\n",
+		tstamp(dp->time), dp->lon, dp->lat, dp->alt, dp->temp, dp->speed, dp->distance );
 	}
 }
 

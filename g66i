@@ -3,6 +3,8 @@
 import wx
 import sys
 import os
+import socket
+import time
 
 import subprocess
 from dataclasses import dataclass
@@ -16,8 +18,8 @@ data = []
 
 @dataclass
 class Tdata :
-        lat: str
         long: str
+        lat: str
 
 xsize = 800
 ysize = 600
@@ -164,6 +166,61 @@ class EZtext ( MyStaticText ) :
 # ----------------------------------------------------------------------------
 # Above here is "standard library" stuff I use in many projects.
 # Below here is the "66" (Garmin 66i) application
+# ----------------------------------------------------------------------------
+
+class Gtopo :
+        server = ('localhost',5555)
+
+        def __init__ ( self ) :
+            self.server = Gtopo.server
+            pass
+
+        @staticmethod
+        def send ( rcmd ) :
+            s = socket.create_connection ( Gtopo.server )
+            cmd = rcmd.encode()
+            s.sendall ( cmd )
+            reply = s.recv(16)
+            #print ( reply )
+            s.close ()
+
+        def send_one ( self, rcmd ) :
+            s = socket.create_connection ( self.server )
+            cmd = rcmd.encode()
+            s.sendall ( cmd )
+            reply = s.recv(16)
+            #print ( reply )
+            s.close ()
+
+        # Animate path
+        def send_demo ( self, data ) :
+            s = socket.create_connection ( self.server )
+
+            #for line in data :
+            #for i in range(1100,1174) :
+            for i in range(len(data)) :
+                #print ( i )
+                cmd = data[i].encode()
+                s.sendall ( cmd )
+                # We don't do anything with the reply
+                # but it is important to wait for it.
+                reply = s.recv(16)
+                time.sleep ( 0.1 )
+            s.close ()
+
+        # Send a list, full speed.
+        def send_list ( self, data ) :
+            s = socket.create_connection ( self.server )
+
+            for line in data :
+                cmd = line.encode()
+                s.sendall ( cmd )
+                # We don't do anything with the reply
+                # but it is important to wait for it.
+                reply = s.recv(16)
+            s.close ()
+
+# ----------------------------------------------------------------------------
 
 # Check every second for new data
 timer_delay = 1000    # milliseconds
@@ -223,8 +280,9 @@ class Main_Panel ( wx.Panel ) :
             if self.counter > len(data) :
                 return
             d = data[self.counter-1]
-
-            print ( f"MC {d.long} {d.lat}" )
+            cmd = f"MC {d.long} {d.lat}"
+            print ( cmd )
+            Gtopo.send ( cmd )
 
         def onEnter ( self, event ) :
             print ( "Enter typed" )
