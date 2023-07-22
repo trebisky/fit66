@@ -20,6 +20,10 @@ data = []
 class Tdata :
         long: str
         lat: str
+        alt: str
+        temp: str
+        speed: str
+        dist: str
 
 xsize = 800
 ysize = 600
@@ -148,7 +152,7 @@ class MyStaticText ( wx.Control ):
 # (and "self" is the value returned by the superclass.)
 
 class EZtext ( MyStaticText ) :
-        def __init__ ( self, parent, sizer, message ) :
+        def __init__ ( self, parent, sizer, message, expand=True ) :
             #rv = MyStaticText.__init__ ( self, parent, wx.ID_ANY, message )
             #sizer.Add ( rv, 1, wx.EXPAND )
             #print ( rv )
@@ -157,7 +161,10 @@ class EZtext ( MyStaticText ) :
             # prefix some space here
             padded = "    " + message
             MyStaticText.__init__ ( self, parent, wx.ID_ANY, padded )
-            sizer.Add ( self, 1, wx.EXPAND )
+            if expand :
+                sizer.Add ( self, 1, wx.EXPAND )
+            else :
+                sizer.Add ( self )
 
         def SetLabel ( self, msg ) :
             padded = "    " + msg
@@ -196,11 +203,9 @@ class Gtopo :
         def send_demo ( self, data ) :
             s = socket.create_connection ( self.server )
 
-            #for line in data :
-            #for i in range(1100,1174) :
-            for i in range(len(data)) :
-                #print ( i )
-                cmd = data[i].encode()
+            for d in data :
+                gcmd = f"MC {d.long} {d.lat}"
+                cmd = gcmd.encode()
                 s.sendall ( cmd )
                 # We don't do anything with the reply
                 # but it is important to wait for it.
@@ -231,8 +236,6 @@ class Main_Panel ( wx.Panel ) :
         def __init__ ( self, parent ) :
             wx.Panel.__init__ ( self, parent )
 
-            self.counter = 1
-
             #self.SetBackgroundColour ( wx.GREEN )
 
             #rsz = wx.BoxSizer ( wx.VERTICAL )
@@ -240,11 +243,28 @@ class Main_Panel ( wx.Panel ) :
 
             #bup = wx.Panel ( self, -1 )
 
-            #bu_sizer = wx.BoxSizer ( wx.HORIZONTAL )
+            self.counter = 1
+
+            main_sizer = wx.BoxSizer ( wx.HORIZONTAL )
+            
+            # Sizer for info on the left
+            info_sizer = wx.BoxSizer ( wx.VERTICAL )
+
+            self.i_index = EZtext ( self, info_sizer, bogus, False )
+            self.i_long = EZtext ( self, info_sizer, bogus, False )
+            self.i_lat = EZtext ( self, info_sizer, bogus, False )
+            self.i_alt = EZtext ( self, info_sizer, bogus, False )
+            self.i_temp = EZtext ( self, info_sizer, bogus, False )
+            self.i_speed = EZtext ( self, info_sizer, bogus, False )
+            self.i_dist = EZtext ( self, info_sizer, bogus, False )
+
+            # Sizer for buttons on the right
             bu_sizer = wx.BoxSizer ( wx.VERTICAL )
 
-            EZtext ( self, bu_sizer, " " )
-            self.display = EZtext ( self, bu_sizer, bogus )
+            main_sizer.Add ( info_sizer, 1, wx.EXPAND )
+            main_sizer.Add ( bu_sizer, 1, wx.EXPAND )
+
+            #self.display = EZtext ( self, bu_sizer, bogus )
 
             self.text = wx.TextCtrl ( self, -1, style = wx.TE_PROCESS_ENTER )
             #self.text.SetInsertionPoint ( 0 )
@@ -257,45 +277,64 @@ class Main_Panel ( wx.Panel ) :
 
             bu_sizer.Add ( self.text, 1, wx.EXPAND )
 
-            self.b_less = wx.Button ( self, wx.ID_ANY, "Less")
-            self.b_less.Bind ( wx.EVT_BUTTON, self.onLess )
+            self.b_next = wx.Button ( self, wx.ID_ANY, "Next")
+            self.b_next.Bind ( wx.EVT_BUTTON, self.onNext )
 
-            self.b_more = wx.Button ( self, wx.ID_ANY, "More")
-            self.b_more.Bind ( wx.EVT_BUTTON, self.onMore )
+            self.b_prev = wx.Button ( self, wx.ID_ANY, "Prev")
+            self.b_prev.Bind ( wx.EVT_BUTTON, self.onPrev )
 
-            self.b_ex = wx.Button ( self, wx.ID_ANY, "Exit")
-            self.b_ex.Bind ( wx.EVT_BUTTON, self.onExit )
+            self.b_play = wx.Button ( self, wx.ID_ANY, "Play")
+            self.b_play.Bind ( wx.EVT_BUTTON, self.onPlay )
 
-            bu_sizer.Add ( self.b_less, 1, wx.EXPAND )
-            bu_sizer.Add ( self.b_more, 1, wx.EXPAND )
-            bu_sizer.Add ( self.b_ex, 1, wx.EXPAND )
-            self.SetSizer ( bu_sizer )
+            self.b_trim = wx.Button ( self, wx.ID_ANY, "Trim")
+            self.b_trim.Bind ( wx.EVT_BUTTON, self.onTrim )
 
-            self.update ()
+            self.b_exit = wx.Button ( self, wx.ID_ANY, "Exit")
+            self.b_exit.Bind ( wx.EVT_BUTTON, self.onExit )
+
+            bu_sizer.Add ( self.b_next, 1, wx.EXPAND )
+            bu_sizer.Add ( self.b_prev, 1, wx.EXPAND )
+            bu_sizer.Add ( self.b_play, 1, wx.EXPAND )
+            bu_sizer.Add ( self.b_trim, 1, wx.EXPAND )
+            bu_sizer.Add ( self.b_exit, 1, wx.EXPAND )
+
+            #self.SetSizer ( bu_sizer )
+            self.SetSizer ( main_sizer )
+
+            self.new_item ()
 
         def new_item ( self ) :
             self.update ()
-            if self.counter < 1 :
-                return
-            if self.counter > len(data) :
-                return
             d = data[self.counter-1]
             cmd = f"MC {d.long} {d.lat}"
-            print ( cmd )
+            #print ( cmd )
             Gtopo.send ( cmd )
 
         def onEnter ( self, event ) :
-            print ( "Enter typed" )
-            val = self.text.GetValue()
-            print ( val )
-            self.counter = int(val)
+            #print ( "Enter typed" )
+            val = int(self.text.GetValue())
+            if val < 1 :
+                val = 1
+            if val > len(data) :
+                val = len(data)
+            self.counter = val
             self.new_item ()
 
         # Called by timer (or button)
         def update ( self ) :
 
-            msg = str ( self.counter )
-            self.display.SetLabel ( msg )
+            #msg = str ( self.counter )
+            #self.display.SetLabel ( msg )
+
+            d = data[self.counter-1]
+
+            self.i_index.SetLabel ( f"Record {self.counter} of {len(data)}" )
+            self.i_long.SetLabel ( f"Long: {d.long}" )
+            self.i_lat.SetLabel ( f"Lat: {d.lat}" )
+            self.i_alt.SetLabel ( f"Alt: {d.alt} feet" )
+            self.i_temp.SetLabel ( f"Temp: {d.temp} F" )
+            self.i_speed.SetLabel ( f"speed: {d.speed} miles/h" )
+            self.i_dist.SetLabel ( f"dist: {d.dist} miles" )
 
         # Tkinter was always a pain in the ass wanting you
         # to call a destroy method and spewing out weird messages
@@ -303,13 +342,22 @@ class Main_Panel ( wx.Panel ) :
         def onExit ( self, event ) :
             sys.exit ()
 
-        def onLess ( self, event ) :
-            self.counter -= 1
-            self.new_item ()
+        def onTrim ( self, event ) :
+            n = self.counter
+            print ( f"Trim to records 1 to {n}" )
 
-        def onMore ( self, event ) :
-            self.counter += 1
-            self.new_item ()
+        def onPlay ( self, event ) :
+            Gtopo().send_demo(data)
+
+        def onPrev ( self, event ) :
+            if self.counter > 1 :
+                self.counter -= 1
+                self.new_item ()
+
+        def onNext ( self, event ) :
+            if self.counter < len(data) :
+                self.counter += 1
+                self.new_item ()
 
 class GPS_Frame (wx.Frame):
  
@@ -359,6 +407,17 @@ class GPS_GUI ( wx.App ):
 
 # ------------------------------------
 
+# Right now records look like this:
+# Wed Jul 12 18:45:26 2023 -111.04864 32.26282 2919.29 91.4 0.0 49.5
+# Wed Jul 12 18:46:45 2023 -111.04864 32.26282 2919.29 93.2 0.0 49.5
+
+d_long = 5
+d_lat = 6
+d_alt = 7
+d_temp = 8
+d_speed = 9
+d_dist = 10
+
 def load_data () :
         result = subprocess.run ( ['./fit66'], stdout=subprocess.PIPE )
         stuff = result.stdout.decode('utf-8').splitlines()
@@ -366,7 +425,7 @@ def load_data () :
             #print ( l )
             w = l.split ()
             #t = Tdata ( float(w[0]), float(w[1]) )
-            t = Tdata ( w[0], w[1] )
+            t = Tdata ( w[d_long], w[d_lat], w[d_alt], w[d_temp], w[d_speed], w[d_dist] )
             data.append ( t )
 
 load_data ()
