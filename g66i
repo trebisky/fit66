@@ -26,8 +26,8 @@ class Tdata :
         speed: str
         dist: str
 
-xsize = 800
-ysize = 600
+xsize = 450
+ysize = 300
 wsize = ( xsize, ysize )
 
 bogus = "          ---"
@@ -200,6 +200,32 @@ class Gtopo :
             #print ( reply )
             s.close ()
 
+        def send_cmd ( self, s, cmd ) :
+            #print ( "Send: " + cmd )
+            s.sendall ( cmd.encode() )
+            reply = s.recv(16)
+            #print ( reply )
+
+        # Draw path
+        def send_path ( self, data ) :
+            s = socket.create_connection ( self.server )
+
+            self.send_cmd ( s, "E" )
+
+            for d in data :
+                gcmd = f"P {d.long} {d.lat}"
+                self.send_cmd ( s, gcmd )
+
+            self.send_cmd ( s, "D" )
+
+            s.close ()
+
+        # Clear path
+        def clear_path ( self, data ) :
+            s = socket.create_connection ( self.server )
+            self.send_cmd ( s, "E" )
+            s.close ()
+
         # Animate path
         def send_demo ( self, data ) :
             s = socket.create_connection ( self.server )
@@ -279,11 +305,17 @@ class Main_Panel ( wx.Panel ) :
 
             bu_sizer.Add ( self.text, 1, wx.EXPAND )
 
-            self.b_next = wx.Button ( self, wx.ID_ANY, "Next")
+            self.b_next = wx.Button ( self, wx.ID_ANY, "+")
             self.b_next.Bind ( wx.EVT_BUTTON, self.onNext )
 
-            self.b_prev = wx.Button ( self, wx.ID_ANY, "Prev")
+            self.b_prev = wx.Button ( self, wx.ID_ANY, "-")
             self.b_prev.Bind ( wx.EVT_BUTTON, self.onPrev )
+
+            self.b_path = wx.Button ( self, wx.ID_ANY, "Path")
+            self.b_path.Bind ( wx.EVT_BUTTON, self.onPath )
+
+            self.b_clear = wx.Button ( self, wx.ID_ANY, "Clear Path")
+            self.b_clear.Bind ( wx.EVT_BUTTON, self.onClear )
 
             self.b_play = wx.Button ( self, wx.ID_ANY, "Play")
             self.b_play.Bind ( wx.EVT_BUTTON, self.onPlay )
@@ -296,6 +328,8 @@ class Main_Panel ( wx.Panel ) :
 
             bu_sizer.Add ( self.b_next, 1, wx.EXPAND )
             bu_sizer.Add ( self.b_prev, 1, wx.EXPAND )
+            bu_sizer.Add ( self.b_path, 1, wx.EXPAND )
+            bu_sizer.Add ( self.b_clear, 1, wx.EXPAND )
             bu_sizer.Add ( self.b_play, 1, wx.EXPAND )
             bu_sizer.Add ( self.b_trim, 1, wx.EXPAND )
             bu_sizer.Add ( self.b_exit, 1, wx.EXPAND )
@@ -310,7 +344,10 @@ class Main_Panel ( wx.Panel ) :
             d = data[self.counter-1]
             cmd = f"MC {d.long} {d.lat}"
             #print ( cmd )
-            Gtopo.send ( cmd )
+            try :
+                Gtopo.send ( cmd )
+            except:
+                print ( "gtopo not running" );
 
         def onEnter ( self, event ) :
             #print ( "Enter typed" )
@@ -349,6 +386,12 @@ class Main_Panel ( wx.Panel ) :
             n = self.counter
             print ( f"Trim to records 1 to {n}" )
 
+        def onPath ( self, event ) :
+            Gtopo().send_path(data)
+
+        def onClear ( self, event ) :
+            Gtopo().clear_path(data)
+
         def onPlay ( self, event ) :
             Gtopo().send_demo(data)
 
@@ -365,8 +408,8 @@ class Main_Panel ( wx.Panel ) :
 class GPS_Frame (wx.Frame):
  
         def __init__ ( self, parent, title ):
-            wx.Frame.__init__(self, None, wx.ID_ANY, title )
-            #wx.Frame.__init__(self, None, wx.ID_ANY, title, size=wsize )
+            #wx.Frame.__init__(self, None, wx.ID_ANY, title )
+            wx.Frame.__init__(self, None, wx.ID_ANY, title, size=wsize )
             #top = wx.Frame.__init__(self, None, wx.ID_ANY, title, pos=(a,b), size=wsize )
 
             #self.data = data
