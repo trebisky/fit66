@@ -144,15 +144,34 @@ global_lookup ( int gid )
  * also implement a 1 byte peek.
  */
 
+off_t
+ltell ( int fd )
+{
+	return lseek ( fd, (off_t) 0, SEEK_CUR );
+}
+
+off_t
+fit_tell ( void )
+{
+	return ltell ( fit_fd );
+}
+
+void
+fit_seek ( off_t pos )
+{
+	(void) lseek ( fit_fd, pos, SEEK_SET );
+}
+
 int
 peek1 ( void )
 {
-	off_t pos = lseek ( fit_fd, (off_t) 0, SEEK_CUR );
+	off_t pos;
 	int n;
 	u8 cbuf;
 
+	pos = fit_tell ();
 	n = read ( fit_fd, &cbuf, 1 );
-	(void) lseek ( fit_fd, pos, SEEK_SET );
+	fit_seek ( pos );
 
 	return cbuf;
 }
@@ -316,6 +335,17 @@ check_crc ( void )
 
 	if ( crc )
 	    oops ( "Bad file CRC" );
+}
+
+int
+calc_crc ( u8 *buf, int n )
+{
+	int i;
+	u16 crc = 0;
+
+	for ( i=0; i<n; i++ )
+	    crc = fit_crc16 ( buf[i], crc );
+	return crc;
 }
 
 void
@@ -606,7 +636,7 @@ decode ( struct definition *dp )
 }
 
 int
-data_record ( struct definition *dp )
+data_record ( struct definition *dp, int do_decode )
 {
 	int header;
 	int id;
@@ -619,13 +649,13 @@ data_record ( struct definition *dp )
 	/* Don't show all 1175 records */
 	if ( dp->size == 40 ) {
 	    record_count++;
-	    decode ( dp );
+	    if ( do_decode )
+		decode ( dp );
 	} else {
 	    if ( dump_level > 1 )
 		printf ( "Data record, header id = %d (%d bytes)\n", id, dp->size  );
 	    readn ( buf, dp->size );
 	}
-
 
 	return 1 + dp->size;
 }
@@ -655,7 +685,7 @@ record ( void )
 	    record_count = 0;
 	} else {
 	    // printf ( "Data record\n" );
-	    nn = data_record ( &def );
+	    nn = data_record ( &def, 1 );
 	}
 
 	// return 1 + nn;
@@ -702,17 +732,23 @@ header ( void )
 }
 
 void
-read_file ( void )
+open_fit ( void )
 {
 	int fd;
-	int nio;
-	int nrec;
 
 	fd = open ( path, O_RDONLY );
 	if ( fd < 0 )
-	    oops ( "open" );
+	    oops ( "Cannot open input FIT file" );
 	fit_fd = fd;
+}
 
+void
+read_file ( void )
+{
+	int nio;
+	int nrec;
+
+	open_fit ();
 	check_crc ();
 
 	nio = header ();
@@ -728,8 +764,128 @@ read_file ( void )
 	    oops ( "Buffalo stampede" );
 	}
 
+	close ( fit_fd );
+
 	// printf ( "All done\n" );
 	// printf ( "File read successfully: %d data points\n", ndata );
+}
+
+/* -------------------------------------------------------- */
+/* Trim stuff */
+
+/* My test file with 1175 record points is just
+ * under 50k, and has over 7 hours of data.
+ * The following should accomodate 6000 points and
+ * well over 24 hours of data.
+ */
+#define TRIM_MAX	300000
+
+u8 trim_buf[TRIM_MAX];
+int ntrim = 0;
+
+void
+trim_append ( u8 *buf, int n )
+{
+	if ( ntrim + n > TRIM_MAX )
+	    oops ( "Trim buffer too small" );
+	memcpy ( &trim_buf[ntrim], buf, n );
+	ntrim += n;
+	// printf ( "Trim append %d %d\n", n, ntrim );
+}
+
+int
+trim_record ( void )
+{
+	int header;
+	int nn;
+	off_t pos;
+	u8 buf[256];
+
+	header = peek1 ();
+
+	if ( header & H_COMP ) {
+	    printf ( "Compressed record\n" );
+	    oops ( "Not ready for compressed records" );
+	} else if ( header & H_DEF ) {
+	    pos = fit_tell ();
+	    nn = definition_record ();
+	    fit_seek ( pos );
+	    readn ( buf, nn );
+	    trim_append ( buf, nn );
+	} else {
+	    pos = fit_tell ();
+	    nn = data_record ( &def, 0 );
+	    fit_seek ( pos );
+	    readn ( buf, nn );
+	    trim_append ( buf, nn );
+	}
+
+	return nn;
+}
+
+char *trim_path = "trim.fit";
+int trim_fd;
+
+void
+trim_file ( int arg_trim )
+{
+	struct fit_header hdr;
+	int nio;
+	int nrec;
+	int fd;
+	u16 crc = 0;
+
+	open_fit ();
+
+	/* Read and copy header */
+	readn ( (u8 *)&hdr, sizeof(struct fit_header) );
+	trim_append ( (u8 *) &hdr, sizeof(struct fit_header) );
+	nio = hdr.f_len;
+
+	// printf ( "Trim: %d data bytes expected\n", nio );
+
+	while ( nio > 0 ) {
+	    nrec = trim_record ();
+	    nio -= nrec;
+	}
+
+	if ( nio != 0 ) {
+	    printf ( "%d bytes left in file\n", nio );
+	    oops ( "Buffalo stampede (trim)" );
+	}
+
+	/* Recalculate CRC values.
+	 * Amazingly, the way this works is that you have something
+	 * like our header with 12 bytes.  You calculate the CRC over
+	 * those 12 bytes, then you append that value (in little
+	 * endian order) to that (giving you 14 bytes).
+	 * Then if you calculate the CRC over those 14 bytes, you get
+	 * zero.
+	 */
+
+	/* Header CRC */
+	// printf ( "Buffer CRC = %02x %02x\n", trim_buf[12], trim_buf[13] );
+	crc = calc_crc ( trim_buf, 12 );
+	memcpy ( &trim_buf[12], &crc, 2 );
+	// printf ( "Buffer CRC = %02x %02x\n", trim_buf[12], trim_buf[13] );
+
+	/* File CRC */
+	crc = calc_crc ( trim_buf, ntrim );
+	trim_append ( (u8 *) &crc, 2 );
+	// crc = calc_crc ( trim_buf, ntrim );
+	// printf ( "Final CRC = %04x\n", crc );
+
+	fd = open ( trim_path, O_CREAT | O_WRONLY | O_TRUNC, 0644 );
+	if ( fd < 0 )
+	    oops ( "Cannot open output trim file" );
+	trim_fd = fd;
+
+
+	// printf ( "%d bytes in trim buffer\n", ntrim );
+	write ( trim_fd, trim_buf, ntrim );
+
+	close ( trim_fd );
+	close ( fit_fd );
 }
 
 void
@@ -750,18 +906,6 @@ out_cmd ( int n )
 	printf ( "MC %.5f %.5f\n", dp->lon, dp->lat );
 }
 
-/*
-struct data {
-	u32	time;
-	double lon;
-	double lat;
-	double alt;
-	double temp;
-	double speed;
-	double distance;
-};
-*/
-
 void
 show_data ( void )
 {
@@ -775,25 +919,70 @@ show_data ( void )
 	}
 }
 
+/* --------------------------------------------------------- */
+/* --------------------------------------------------------- */
+
+enum cmd { EXTRACT, DUMP, TRIM };
+
+enum cmd cmd = EXTRACT;
+
+void
+usage ( void )
+{
+	oops ( "Usage: fit66 -e path" );
+}
+
+void
+cmdline ( int argc, char **argv )
+{
+	char *p;
+
+	while ( argc-- ) {
+	    p = *argv;
+
+	    /*
+	    rec_num = atoi ( *argv );
+	    printf ( "Record %d\n", rec_num );
+	    out_cmd ( rec_num );
+	    */
+	    if ( *p == '-' && p[1] == 't' )
+		cmd = TRIM;
+	    if ( *p == '-' && p[1] == 'd' )
+		cmd = DUMP;
+	    if ( *p == '-' && p[1] == 'e' )
+		cmd = EXTRACT;
+
+	    argv++;
+	}
+}
+
+#define NTRIM	442
+
 int
 main ( int argc, char **argv )
 {
 	argc--;
 	argv++;
 
-	// dump_file ();
+	cmdline ( argc, argv );
 
-	read_file ();
-	show_data ();
-
-	while ( argc-- ) {
-	    rec_num = atoi ( *argv );
-	    printf ( "Record %d\n", rec_num );
-
-	    out_cmd ( rec_num );
-
-	    argv++;
+	if ( cmd == DUMP ) {
+	    dump_file ();
+	    return 0;
 	}
+
+	if ( cmd == EXTRACT ) {
+	    read_file ();
+	    show_data ();
+	    return 0;
+	}
+
+	if ( cmd == TRIM ) {
+	    trim_file ( NTRIM );
+	    return 0;
+	}
+
+	usage ();
 
 	// wgs_test ();
 

@@ -18,6 +18,7 @@ data = []
 
 @dataclass
 class Tdata :
+        time: str
         long: str
         lat: str
         alt: str
@@ -251,6 +252,7 @@ class Main_Panel ( wx.Panel ) :
             info_sizer = wx.BoxSizer ( wx.VERTICAL )
 
             self.i_index = EZtext ( self, info_sizer, bogus, False )
+            self.i_time = EZtext ( self, info_sizer, bogus, False )
             self.i_long = EZtext ( self, info_sizer, bogus, False )
             self.i_lat = EZtext ( self, info_sizer, bogus, False )
             self.i_alt = EZtext ( self, info_sizer, bogus, False )
@@ -329,6 +331,7 @@ class Main_Panel ( wx.Panel ) :
             d = data[self.counter-1]
 
             self.i_index.SetLabel ( f"Record {self.counter} of {len(data)}" )
+            self.i_time.SetLabel ( f"Time: {d.time}" )
             self.i_long.SetLabel ( f"Long: {d.long}" )
             self.i_lat.SetLabel ( f"Lat: {d.lat}" )
             self.i_alt.SetLabel ( f"Alt: {d.alt} feet" )
@@ -411,6 +414,9 @@ class GPS_GUI ( wx.App ):
 # Wed Jul 12 18:45:26 2023 -111.04864 32.26282 2919.29 91.4 0.0 49.5
 # Wed Jul 12 18:46:45 2023 -111.04864 32.26282 2919.29 93.2 0.0 49.5
 
+# How many words in timestamp
+num_time = 5
+
 d_long = 5
 d_lat = 6
 d_alt = 7
@@ -425,7 +431,8 @@ def load_data () :
             #print ( l )
             w = l.split ()
             #t = Tdata ( float(w[0]), float(w[1]) )
-            t = Tdata ( w[d_long], w[d_lat], w[d_alt], w[d_temp], w[d_speed], w[d_dist] )
+            ts = " ".join ( w[0:num_time] )
+            t = Tdata ( ts, w[d_long], w[d_lat], w[d_alt], w[d_temp], w[d_speed], w[d_dist] )
             data.append ( t )
 
 load_data ()
