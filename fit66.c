@@ -26,7 +26,8 @@
 #include <arpa/inet.h>
 */
 
-char *path = "/home/tom/c.fit";
+// char *path = "/home/tom/c.fit";
+char *path = "trim.fit";
 
 /*
 
@@ -72,6 +73,8 @@ struct __attribute__((__packed__)) fit_header {
 	char sig[4];
 	u16 crc;
 };
+
+struct fit_header hdr;
 
 /* --------------------------------------------------------------------- */
 /* --------------------------------------------------------------------- */
@@ -365,6 +368,17 @@ check_header_crc ( u8 *h, int size )
 
 /* ---------------------------------------------------------------------- */
 
+void
+hex_dump ( u8 *buf, int n )
+{
+	int i;
+
+	for ( i=0; i<n; i++ ) {
+	    printf ( "%02x", buf[i] );
+	}
+	printf ( "\n" );
+}
+
 struct __attribute__((__packed__)) def_hdr {
 	u8	header;
 	u8	reserved;
@@ -373,6 +387,8 @@ struct __attribute__((__packed__)) def_hdr {
 	u8	nf;
 };
 
+struct def_hdr dhdr;
+struct global *gp;
 
 int
 definition_record ( void )
@@ -380,7 +396,8 @@ definition_record ( void )
 	int id;
 	// int n;
 	int i;
-	struct def_hdr dhdr;
+	// struct def_hdr dhdr;
+	// struct global *gp;
 
 	int size;
 	int nf;
@@ -388,7 +405,6 @@ definition_record ( void )
 	int ndev = 0;
 
 	struct field ff;
-	struct global *gp;
 
 	// printf ( "Sizeof def header = %d\n", sizeof(struct def_hdr) );
 	// n = read ( fd, (char *) &dhdr, sizeof(struct def_hdr) );
@@ -404,7 +420,8 @@ definition_record ( void )
 
 	gp = global_lookup ( dhdr.g_id );
 	if ( ! gp ) {
-	    printf ( "gid = %d\n", dhdr.g_id );
+	    printf ( "gid = %d (0x%04x)\n", dhdr.g_id, dhdr.g_id );
+	    hex_dump ( (char *) &dhdr, sizeof(struct def_hdr) );
 	    oops ( "Alligator attack" );
 	}
 
@@ -649,8 +666,11 @@ data_record ( struct definition *dp, int do_decode )
 	/* Don't show all 1175 records */
 	if ( dp->size == 40 ) {
 	    record_count++;
+	    /* If we don't decode, we still must skip the data */
 	    if ( do_decode )
 		decode ( dp );
+	    else
+		readn ( buf, dp->size );
 	} else {
 	    if ( dump_level > 1 )
 		printf ( "Data record, header id = %d (%d bytes)\n", id, dp->size  );
@@ -696,7 +716,7 @@ record ( void )
 int
 header ( void )
 {
-	struct fit_header hdr;
+	// struct fit_header hdr;
 	int n;
 
 	// printf ( "header size expected to be: %d\n", sizeof(struct fit_header) );
@@ -783,6 +803,8 @@ read_file ( void )
 u8 trim_buf[TRIM_MAX];
 int ntrim = 0;
 
+int trim_count;
+
 void
 trim_append ( u8 *buf, int n )
 {
@@ -794,12 +816,14 @@ trim_append ( u8 *buf, int n )
 }
 
 int
-trim_record ( void )
+trim_record ( int limit )
 {
 	int header;
 	int nn;
 	off_t pos;
+	off_t xpos;
 	u8 buf[256];
+	int copy;
 
 	header = peek1 ();
 
@@ -808,16 +832,49 @@ trim_record ( void )
 	    oops ( "Not ready for compressed records" );
 	} else if ( header & H_DEF ) {
 	    pos = fit_tell ();
+	    // printf ( "DEFPOS = %d\n", pos );
 	    nn = definition_record ();
 	    fit_seek ( pos );
 	    readn ( buf, nn );
 	    trim_append ( buf, nn );
+	    // printf ( "DEF %d\n", nn );
+	    // printf ( "Definition record, global ID = %d -- %s\n", dhdr.g_id, gp->name );
+	    trim_count = 0;
 	} else {
 	    pos = fit_tell ();
+	    // printf ( "DATAPOS1 = %d\n", pos );
 	    nn = data_record ( &def, 0 );
+	    trim_count++;
+	    //xpos = fit_tell ();
+	    //printf ( "DATAPOS2 = %d\n", xpos );
+
+	    // printf ( "DATA %d bytes (%d)\n", nn, trim_count );
+
+    #ifdef notdef
 	    fit_seek ( pos );
 	    readn ( buf, nn );
-	    trim_append ( buf, nn );
+	    hex_dump ( buf, nn );
+    #endif
+
+	    /* XXX - Checking the size is a hackish way to
+	     * identify the records we want.
+	     */
+	    copy = 1;
+
+	    if ( nn == 41 ) {
+		// printf ( "%d %d of %d\n", nn, trim_count, limit );
+		if ( trim_count > limit )
+		    copy = 0;
+	    }
+
+	    if ( copy ) {
+		fit_seek ( pos );
+		// printf ( "Copy %d bytes\n", nn );
+		readn ( buf, nn );
+		trim_append ( buf, nn );
+	    }
+	    // xpos = fit_tell ();
+	    // printf ( "DATAPOS3 = %d\n", xpos );
 	}
 
 	return nn;
@@ -827,13 +884,13 @@ char *trim_path = "trim.fit";
 int trim_fd;
 
 void
-trim_file ( int arg_trim )
+trim_file ( int limit )
 {
 	struct fit_header hdr;
 	int nio;
 	int nrec;
 	int fd;
-	u16 crc = 0;
+	u16 crc;
 
 	open_fit ();
 
@@ -845,7 +902,7 @@ trim_file ( int arg_trim )
 	// printf ( "Trim: %d data bytes expected\n", nio );
 
 	while ( nio > 0 ) {
-	    nrec = trim_record ();
+	    nrec = trim_record ( limit );
 	    nio -= nrec;
 	}
 
@@ -853,6 +910,9 @@ trim_file ( int arg_trim )
 	    printf ( "%d bytes left in file\n", nio );
 	    oops ( "Buffalo stampede (trim)" );
 	}
+
+	/* Put proper data length into header */
+	hdr.f_len = ntrim - sizeof(struct fit_header);
 
 	/* Recalculate CRC values.
 	 * Amazingly, the way this works is that you have something
@@ -865,8 +925,9 @@ trim_file ( int arg_trim )
 
 	/* Header CRC */
 	// printf ( "Buffer CRC = %02x %02x\n", trim_buf[12], trim_buf[13] );
-	crc = calc_crc ( trim_buf, 12 );
-	memcpy ( &trim_buf[12], &crc, 2 );
+	crc = calc_crc ( (u8 *) &hdr, sizeof(struct fit_header)-2 );
+	hdr.crc = crc;
+	memcpy ( trim_buf, (u8 *) &hdr, sizeof(struct fit_header) );
 	// printf ( "Buffer CRC = %02x %02x\n", trim_buf[12], trim_buf[13] );
 
 	/* File CRC */
@@ -925,6 +986,7 @@ show_data ( void )
 enum cmd { EXTRACT, DUMP, TRIM };
 
 enum cmd cmd = EXTRACT;
+// enum cmd cmd = TRIM;
 
 void
 usage ( void )
