@@ -9,6 +9,8 @@ import time
 import subprocess
 from dataclasses import dataclass
 
+from pathlib import Path
+
 #import numpy as np
 #import datetime
 #import math
@@ -26,8 +28,11 @@ class Tdata :
         speed: str
         dist: str
 
+load_file = ""
+
 xsize = 450
 ysize = 300
+#ysize = 500
 wsize = ( xsize, ysize )
 
 bogus = "          ---"
@@ -56,6 +61,7 @@ bogus = "          ---"
 #    Thanks Hesky !!
 
 class MyStaticText ( wx.Control ):
+
     def __init__(self, parent, id=wx.ID_ANY, label="", 
                  pos=wx.DefaultPosition, size=wx.DefaultSize, 
                  style=0, validator=wx.DefaultValidator, 
@@ -153,6 +159,7 @@ class MyStaticText ( wx.Control ):
 # (and "self" is the value returned by the superclass.)
 
 class EZtext ( MyStaticText ) :
+
         def __init__ ( self, parent, sizer, message, expand=True ) :
             #rv = MyStaticText.__init__ ( self, parent, wx.ID_ANY, message )
             #sizer.Add ( rv, 1, wx.EXPAND )
@@ -177,6 +184,7 @@ class EZtext ( MyStaticText ) :
 # ----------------------------------------------------------------------------
 
 class Gtopo :
+
         server = ('localhost',5555)
 
         def __init__ ( self ) :
@@ -210,11 +218,14 @@ class Gtopo :
         def send_path ( self, data ) :
             s = socket.create_connection ( self.server )
 
+            # Center the map on the first point
+            d = data[0]
+            self.send_cmd ( s, f"C {d.long} {d.lat}" )
+
             self.send_cmd ( s, "E" )
 
             for d in data :
-                gcmd = f"P {d.long} {d.lat}"
-                self.send_cmd ( s, gcmd )
+                self.send_cmd ( s, f"P {d.long} {d.lat}" )
 
             self.send_cmd ( s, "D" )
 
@@ -254,13 +265,81 @@ class Gtopo :
 
 # ----------------------------------------------------------------------------
 
+# Right now records (from fit66) look like this:
+# Wed Jul 12 18:45:26 2023 -111.04864 32.26282 2919.29 91.4 0.0 49.5
+# Wed Jul 12 18:46:45 2023 -111.04864 32.26282 2919.29 93.2 0.0 49.5
+
+class Data :
+        #fit_cmd_path = "./fit66"
+        fit_cmd_path = "/home/tom/bin/fit66"
+
+        # How many words in timestamp
+        num_time = 5
+
+        d_long = 5
+        d_lat = 6
+        d_alt = 7
+        d_temp = 8
+        d_speed = 9
+        d_dist = 10
+
+        @staticmethod
+        def load ( path ) :
+            global data
+            global load_file
+
+            result = subprocess.run ( [Data.fit_cmd_path, path], stdout=subprocess.PIPE )
+            stuff = result.stdout.decode('utf-8').splitlines()
+
+            data = []
+            for l in stuff :
+                #print ( l )
+                w = l.split ()
+                #t = Tdata ( float(w[0]), float(w[1]) )
+                ts = " ".join ( w[0:Data.num_time] )
+                l_long = w[Data.d_long]
+                l_lat = w[Data.d_lat]
+                l_alt = w[Data.d_alt]
+                l_temp = w[Data.d_temp]
+                l_speed = w[Data.d_speed]
+                l_dist = w[Data.d_dist]
+                #t = Tdata ( ts, w[d_long], w[d_lat], w[d_alt], w[d_temp], w[d_speed], w[d_dist] )
+                t = Tdata ( ts, l_long, l_lat, l_alt, l_temp, l_speed, l_dist )
+                data.append ( t )
+            print ( f"{len(data)} records loaded from {path}")
+            load_file = Path(path).name
+
+# ----------------------------------------------------------------------------
+
+def OnXOpen(self, event):
+
+    if self.contentNotSaved:
+        if wx.MessageBox("Current content has not been saved! Proceed?", "Please confirm",
+                         wx.ICON_QUESTION | wx.YES_NO, self) == wx.NO:
+            return
+
+    # otherwise ask the user what new file to open
+    with wx.FileDialog(self, "Open XYZ file", wildcard="XYZ files (*.xyz)|*.xyz",
+                       style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
+
+        if fileDialog.ShowModal() == wx.ID_CANCEL:
+            return     # the user changed their mind
+
+        # Proceed loading the file chosen by the user
+        pathname = fileDialog.GetPath()
+        try:
+            with open(pathname, 'r') as file:
+                self.doLoadDataOrWhatever(file)
+        except IOError:
+            wx.LogError("Cannot open file '%s'." % newfile)
+
 # Check every second for new data
 timer_delay = 1000    # milliseconds
 
-#the_counter = 0
-
 class Main_Panel ( wx.Panel ) :
+
         def __init__ ( self, parent ) :
+
             wx.Panel.__init__ ( self, parent )
 
             #self.SetBackgroundColour ( wx.GREEN )
@@ -270,13 +349,14 @@ class Main_Panel ( wx.Panel ) :
 
             #bup = wx.Panel ( self, -1 )
 
-            self.counter = 1
+            self.index = 1
 
             main_sizer = wx.BoxSizer ( wx.HORIZONTAL )
             
             # Sizer for info on the left
             info_sizer = wx.BoxSizer ( wx.VERTICAL )
 
+            self.i_path = EZtext ( self, info_sizer, bogus, False )
             self.i_index = EZtext ( self, info_sizer, bogus, False )
             self.i_time = EZtext ( self, info_sizer, bogus, False )
             self.i_long = EZtext ( self, info_sizer, bogus, False )
@@ -292,56 +372,71 @@ class Main_Panel ( wx.Panel ) :
             main_sizer.Add ( info_sizer, 1, wx.EXPAND )
             main_sizer.Add ( bu_sizer, 1, wx.EXPAND )
 
-            #self.display = EZtext ( self, bu_sizer, bogus )
+            #self.b_open = wx.Button ( self, wx.ID_ANY, "Open")
+            #self.b_open.Bind ( wx.EVT_BUTTON, self.onOpen )
+            #bu_sizer.Add ( self.b_open, 1, wx.EXPAND )
 
             self.text = wx.TextCtrl ( self, -1, style = wx.TE_PROCESS_ENTER )
             #self.text.SetInsertionPoint ( 0 )
-            self.text.SetValue ( str(self.counter) )
+            self.text.SetValue ( str(self.index) )
 
             #self.text.Bind ( wx.EVT_TEXT, self.OnKeyTyped )
             #self.text.SetMaxLength(5)
             #self.text.Bind ( wx.EVT_TEXT_MAXLEN, self.OnMaxLen )
             self.text.Bind ( wx.EVT_TEXT_ENTER, self.onEnter )
-
             bu_sizer.Add ( self.text, 1, wx.EXPAND )
 
-            self.b_next = wx.Button ( self, wx.ID_ANY, "+")
-            self.b_next.Bind ( wx.EVT_BUTTON, self.onNext )
+            pm_sizer = wx.BoxSizer ( wx.HORIZONTAL )
+            bu_sizer.Add ( pm_sizer, 1, wx.EXPAND )
 
             self.b_prev = wx.Button ( self, wx.ID_ANY, "-")
             self.b_prev.Bind ( wx.EVT_BUTTON, self.onPrev )
+            pm_sizer.Add ( self.b_prev, 1, wx.EXPAND )
+
+            self.b_next = wx.Button ( self, wx.ID_ANY, "+")
+            self.b_next.Bind ( wx.EVT_BUTTON, self.onNext )
+            pm_sizer.Add ( self.b_next, 1, wx.EXPAND )
 
             self.b_path = wx.Button ( self, wx.ID_ANY, "Path")
             self.b_path.Bind ( wx.EVT_BUTTON, self.onPath )
+            bu_sizer.Add ( self.b_path, 1, wx.EXPAND )
 
             self.b_clear = wx.Button ( self, wx.ID_ANY, "Clear Path")
             self.b_clear.Bind ( wx.EVT_BUTTON, self.onClear )
+            bu_sizer.Add ( self.b_clear, 1, wx.EXPAND )
 
             self.b_play = wx.Button ( self, wx.ID_ANY, "Play")
             self.b_play.Bind ( wx.EVT_BUTTON, self.onPlay )
-
-            self.b_trim = wx.Button ( self, wx.ID_ANY, "Trim")
-            self.b_trim.Bind ( wx.EVT_BUTTON, self.onTrim )
-
-            self.b_exit = wx.Button ( self, wx.ID_ANY, "Exit")
-            self.b_exit.Bind ( wx.EVT_BUTTON, self.onExit )
-
-            bu_sizer.Add ( self.b_next, 1, wx.EXPAND )
-            bu_sizer.Add ( self.b_prev, 1, wx.EXPAND )
-            bu_sizer.Add ( self.b_path, 1, wx.EXPAND )
-            bu_sizer.Add ( self.b_clear, 1, wx.EXPAND )
             bu_sizer.Add ( self.b_play, 1, wx.EXPAND )
-            bu_sizer.Add ( self.b_trim, 1, wx.EXPAND )
-            bu_sizer.Add ( self.b_exit, 1, wx.EXPAND )
+
+            #self.b_trim = wx.Button ( self, wx.ID_ANY, "Trim")
+            #self.b_trim.Bind ( wx.EVT_BUTTON, self.onTrim )
+            #bu_sizer.Add ( self.b_trim, 1, wx.EXPAND )
+
+            #self.b_exit = wx.Button ( self, wx.ID_ANY, "Exit")
+            #self.b_exit.Bind ( wx.EVT_BUTTON, self.onExit )
+            #bu_sizer.Add ( self.b_exit, 1, wx.EXPAND )
 
             #self.SetSizer ( bu_sizer )
             self.SetSizer ( main_sizer )
 
-            self.new_item ()
+            # Trigger first display of path
+            Gtopo().send_path(data)
+            #self.new_item ()
+            self.update ()
 
+
+        # Called when a new file is loaded
+        def set_index ( self, val ) :
+
+            self.index = val
+            self.update ()
+
+        # Called when we adjust the index
         def new_item ( self ) :
             self.update ()
-            d = data[self.counter-1]
+
+            d = data[self.index-1]
             cmd = f"MC {d.long} {d.lat}"
             #print ( cmd )
             try :
@@ -349,25 +444,16 @@ class Main_Panel ( wx.Panel ) :
             except:
                 print ( "gtopo not running" );
 
-        def onEnter ( self, event ) :
-            #print ( "Enter typed" )
-            val = int(self.text.GetValue())
-            if val < 1 :
-                val = 1
-            if val > len(data) :
-                val = len(data)
-            self.counter = val
-            self.new_item ()
-
-        # Called by timer (or button)
+        # Called to update text display
         def update ( self ) :
 
-            #msg = str ( self.counter )
+            #msg = str ( self.index )
             #self.display.SetLabel ( msg )
 
-            d = data[self.counter-1]
+            d = data[self.index-1]
 
-            self.i_index.SetLabel ( f"Record {self.counter} of {len(data)}" )
+            self.i_path.SetLabel ( load_file )
+            self.i_index.SetLabel ( f"Record {self.index} of {len(data)}" )
             self.i_time.SetLabel ( f"Time: {d.time}" )
             self.i_long.SetLabel ( f"Long: {d.long}" )
             self.i_lat.SetLabel ( f"Lat: {d.lat}" )
@@ -376,15 +462,21 @@ class Main_Panel ( wx.Panel ) :
             self.i_speed.SetLabel ( f"speed: {d.speed} miles/h" )
             self.i_dist.SetLabel ( f"dist: {d.dist} miles" )
 
+        def onEnter ( self, event ) :
+            #print ( "Enter typed" )
+            val = int(self.text.GetValue())
+            if val < 1 :
+                val = 1
+            if val > len(data) :
+                val = len(data)
+            self.index = val
+            self.new_item ()
+
         # Tkinter was always a pain in the ass wanting you
         # to call a destroy method and spewing out weird messages
         # whatever you did. wxPython just works nicely if you do this.
-        def onExit ( self, event ) :
-            sys.exit ()
-
-        def onTrim ( self, event ) :
-            n = self.counter
-            print ( f"Trim to records 1 to {n}" )
+        #def onExit ( self, event ) :
+        #    sys.exit ()
 
         def onPath ( self, event ) :
             Gtopo().send_path(data)
@@ -396,13 +488,13 @@ class Main_Panel ( wx.Panel ) :
             Gtopo().send_demo(data)
 
         def onPrev ( self, event ) :
-            if self.counter > 1 :
-                self.counter -= 1
+            if self.index > 1 :
+                self.index -= 1
                 self.new_item ()
 
         def onNext ( self, event ) :
-            if self.counter < len(data) :
-                self.counter += 1
+            if self.index < len(data) :
+                self.index += 1
                 self.new_item ()
 
 class GPS_Frame (wx.Frame):
@@ -427,24 +519,74 @@ class GPS_Frame (wx.Frame):
             #splitter.SplitVertically ( self.lpanel, self.rpanel )
             #splitter.SetSashPosition ( split_pos, True )
 
+            self.menubar = wx.MenuBar()
+            self.SetMenuBar(self.menubar)
+
+            # Ampersands do nothing here.
+            fileMenu = wx.Menu()
+            newitem = wx.MenuItem ( fileMenu, wx.ID_OPEN, text = "Open" )
+            # newitem = wx.MenuItem ( fileMenu, wx.ID_OPEN, text = "&Open", kind = wx.ITEM_NORMAL)
+            fileMenu.Append(newitem)
+            newitem = wx.MenuItem ( fileMenu, wx.ID_FILE1, text = "Trim" )
+            fileMenu.Append(newitem)
+            newitem = wx.MenuItem ( fileMenu, wx.ID_EXIT, text = "Exit" )
+            fileMenu.Append(newitem)
+
+            # The ampersand produces an accelerator key
+            # self.menubar.Append(fileMenu, '&File')
+            self.menubar.Append(fileMenu, 'File')
+            self.Bind ( wx.EVT_MENU, self.onMenu)
+
             self.panel = Main_Panel ( self )
 #
             self.timer = wx.Timer ( self )
             self.Bind ( wx.EVT_TIMER, self.timer_update, self.timer )
             self.timer.Start ( timer_delay )
 
+        def onOpen ( self ) :
+            with wx.FileDialog(self, "Open FIT file", wildcard="FIT files (*.fit)|*.fit",
+                       style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
+
+                # the user changed their mind
+                if fileDialog.ShowModal() == wx.ID_CANCEL:
+                    print ( "user abandoned" )
+                    return
+
+                pathname = fileDialog.GetPath()
+                print ( pathname )
+                Data.load ( pathname )
+
+                Gtopo().send_path(data)
+
+                self.panel.set_index ( 1 )
+
+        # FILE1 to FILE9 are defined, so I feel free to use them.
+        # or I could ask wxPython to generate an ID for me.
+        def onMenu ( self, event ) :
+            id = event.GetId()
+            #print ( f"Menu event: {id}" );
+
+            if id == wx.ID_OPEN:
+                self.onOpen ()
+
+            if id == wx.ID_EXIT:
+                sys.exit ()
+
+            if id == wx.ID_FILE1:
+                # XXX
+                n = self.index
+                print ( f"Trim to records 1 to {n}" )
+                print ( "(not ready yet)" )
+
         # Called at 1 Hz
         def timer_update ( self, event ) :
             pass
-            #global the_counter
 
             #print ( "Tick" )
-            #the_counter += 1
-            #print ( the_counter )
-
             #self.panel.update ()
 
 class GPS_GUI ( wx.App ):
+
         def __init__ ( self ) :
             wx.App.__init__(self)
             frame = GPS_Frame ( None, "GPS Tool" )
@@ -453,32 +595,15 @@ class GPS_GUI ( wx.App ):
 
 # ------------------------------------
 
-# Right now records look like this:
-# Wed Jul 12 18:45:26 2023 -111.04864 32.26282 2919.29 91.4 0.0 49.5
-# Wed Jul 12 18:46:45 2023 -111.04864 32.26282 2919.29 93.2 0.0 49.5
+demo_file = "/u1/Projects/Garmin/fit66/sample.fit"
 
-# How many words in timestamp
-num_time = 5
+if len ( sys.argv ) < 2 :
+    file = demo_file
+else :
+    file = sys.argv[1]
 
-d_long = 5
-d_lat = 6
-d_alt = 7
-d_temp = 8
-d_speed = 9
-d_dist = 10
-
-def load_data () :
-        result = subprocess.run ( ['./fit66'], stdout=subprocess.PIPE )
-        stuff = result.stdout.decode('utf-8').splitlines()
-        for l in stuff :
-            #print ( l )
-            w = l.split ()
-            #t = Tdata ( float(w[0]), float(w[1]) )
-            ts = " ".join ( w[0:num_time] )
-            t = Tdata ( ts, w[d_long], w[d_lat], w[d_alt], w[d_temp], w[d_speed], w[d_dist] )
-            data.append ( t )
-
-load_data ()
+print ( file )
+Data.load ( file )
 
 # -------------
 

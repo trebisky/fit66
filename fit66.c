@@ -26,8 +26,10 @@
 #include <arpa/inet.h>
 */
 
-// char *path = "/home/tom/c.fit";
-char *path = "trim.fit";
+char *default_path = "/home/tom/c.fit";
+// char *in_path = "/home/tom/c.fit";
+// char *in_path = "trim.fit";
+char *in_path;
 
 /*
 
@@ -233,11 +235,16 @@ readn ( u8 *buf, int nbuf )
  * At the pole, the distance is 6356752.3 meters
  *    (a difference of 21384.7 meters (21.4 km))
  *
+ * So -- what precision should we print floating point values at
+ *   %.1f is 0.1 degree is 36,416 feet
+ *   %.5f is 0.00001 degree is 36.4 feet
+ *  maybe .6f would be better (3.6 feet)
+ *
  * The following code gives:
-    38.0 degrees North latitude
-	long (fpd) = 288164.26
-	lat  (fpd) = 364161.71
-
+ *  38.0 degrees North latitude
+ *	long (fpd) = 288164.26
+ *	lat  (fpd) = 364161.71
+ *
  */
 
 void
@@ -756,7 +763,7 @@ open_fit ( void )
 {
 	int fd;
 
-	fd = open ( path, O_RDONLY );
+	fd = open ( in_path, O_RDONLY );
 	if ( fd < 0 )
 	    oops ( "Cannot open input FIT file" );
 	fit_fd = fd;
@@ -964,7 +971,7 @@ out_cmd ( int n )
 	struct data *dp;
 
 	dp = &data[n];
-	printf ( "MC %.5f %.5f\n", dp->lon, dp->lat );
+	printf ( "MC %.6f %.6f\n", dp->lon, dp->lat );
 }
 
 void
@@ -975,7 +982,7 @@ show_data ( void )
 
 	for ( i=0; i<ndata; i++ ) {
 	    dp = &data[i];
-	    printf ( "%s %.5f %.5f %.2f %.1f %.1f %.1f\n",
+	    printf ( "%s %.6f %.6f %.2f %.1f %.1f %.1f\n",
 		tstamp(dp->time), dp->lon, dp->lat, dp->alt, dp->temp, dp->speed, dp->distance );
 	}
 }
@@ -1027,6 +1034,11 @@ main ( int argc, char **argv )
 	argv++;
 
 	cmdline ( argc, argv );
+
+	if ( argc > 0 )
+	    in_path = *argv;
+	else
+	    in_path = default_path;
 
 	if ( cmd == DUMP ) {
 	    dump_file ();
