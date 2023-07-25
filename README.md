@@ -65,3 +65,18 @@ the following structure:
 - activity message
 - CRC (2 bytes)
 
+---------------------
+
+Also included is g66i
+
+This is a python script that acts as a GUI frontend to fit66.
+Its main purpose is to relay data from the FIT files to my
+"gtopo" map display program -- so if you don't have this, you
+probably won't find it greatly useful.
+
+It allows display of a given track on a 7.5 minute map, or any other scale,
+but the 7.5 minute maps are generally the most interesting.
+
+It also allows point by point display on the map, along with display
+of numerical values on the GUI.
+
