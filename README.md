@@ -14,6 +14,9 @@ There are 3 major modes:
 * fit -e path -- extract records as plain ascii
 * fit -t path -- trim records from end of file
 
+The g66i program (in python, see below) uses "fit -e" to extract data
+from a fit file, which it then relays to my gtopo program for display.
+
 ---------------------
 
 Here is a sort of mini FIT file tutorial.

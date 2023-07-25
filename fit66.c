@@ -26,7 +26,10 @@
 #include <arpa/inet.h>
 */
 
-char *default_path = "/home/tom/c.fit";
+/* This is the 442 point trimmed version of c.fit
+ */
+char *default_path = "/u1/Projects/Garmin/fit66/sample.fit";
+// char *default_path = "/home/tom/c.fit";
 // char *in_path = "/home/tom/c.fit";
 // char *in_path = "trim.fit";
 char *in_path;
@@ -101,6 +104,9 @@ struct global ginfo[] = {
     { 34, "activity" },
     { 0, NULL }
 };
+
+/* These are what carry all the data we care about */
+#define GID_RECORD	20
 
 void
 oops ( char *msg )
@@ -634,6 +640,10 @@ decode ( struct definition *dp )
 		dist = val / 100.0;
 	}
 
+	/* Note: with no temperature sensor available we get a
+	 * raw value of 0x7f (127) which scales to 260.6
+	 */
+
 	alt = alt/5.0 - 500.0;
 	alt *= M2F;
 
@@ -710,6 +720,14 @@ record ( void )
 	    // printf ( "Definition record\n" );
 	    nn = definition_record ();
 	    record_count = 0;
+
+	    /* Usually we see this:
+	     *   Definition record, global ID = 20 -- record (40 bytes)
+	     */
+	    if ( dhdr.g_id == GID_RECORD && def.size != 40) {
+		printf ( "Definition record, global ID = %d -- %s (%d bytes)\n", dhdr.g_id, gp->name, def.size );
+		oops ( "Data record with unexpected format" );
+	    }
 	} else {
 	    // printf ( "Data record\n" );
 	    nn = data_record ( &def, 1 );
@@ -764,8 +782,10 @@ open_fit ( void )
 	int fd;
 
 	fd = open ( in_path, O_RDONLY );
-	if ( fd < 0 )
+	if ( fd < 0 ) {
+	    printf ( "Input FIT file: %s\n", in_path );
 	    oops ( "Cannot open input FIT file" );
+	}
 	fit_fd = fd;
 }
 
@@ -990,6 +1010,14 @@ show_data ( void )
 /* --------------------------------------------------------- */
 /* --------------------------------------------------------- */
 
+/* Actual usage:
+ * fit66 path is the same as fit66 -e path
+ * fit66 -e path - extracts records as ascii
+ * fit66 -d path - dumps the file for analysis
+ * fit66 -t path - trims the file (not quite done)
+ *   (see NTRIM below)
+ */
+
 enum cmd { EXTRACT, DUMP, TRIM };
 
 enum cmd cmd = EXTRACT;
@@ -1006,23 +1034,30 @@ cmdline ( int argc, char **argv )
 {
 	char *p;
 
-	while ( argc-- ) {
+	while ( argc ) {
 	    p = *argv;
+	    if ( *p != '-' )
+		break;
 
-	    /*
+	    /* Forget this.
 	    rec_num = atoi ( *argv );
 	    printf ( "Record %d\n", rec_num );
 	    out_cmd ( rec_num );
 	    */
-	    if ( *p == '-' && p[1] == 't' )
+
+	    if ( p[1] == 't' )
 		cmd = TRIM;
-	    if ( *p == '-' && p[1] == 'd' )
+	    if ( p[1] == 'd' )
 		cmd = DUMP;
-	    if ( *p == '-' && p[1] == 'e' )
+	    if ( p[1] == 'e' )
 		cmd = EXTRACT;
 
+	    argc--;
 	    argv++;
 	}
+
+	if ( argc > 0 )
+	    in_path = *argv;
 }
 
 #define NTRIM	442
@@ -1033,12 +1068,9 @@ main ( int argc, char **argv )
 	argc--;
 	argv++;
 
-	cmdline ( argc, argv );
+	in_path = default_path;
 
-	if ( argc > 0 )
-	    in_path = *argv;
-	else
-	    in_path = default_path;
+	cmdline ( argc, argv );
 
 	if ( cmd == DUMP ) {
 	    dump_file ();
