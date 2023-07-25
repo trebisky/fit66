@@ -8,6 +8,12 @@ to read FIT files from my Garmin 66i
 I compile and run this on my linux system
 (currently Fedora 38 -- x86_64)
 
+There are 3 major modes:
+
+fit -d path -- dump the file for analysis
+fit -e path -- extract records as plain ascii
+fit -t path -- trim records from end of file
+
 ---------------------
 
 Here is a sort of mini FIT file tutorial.
