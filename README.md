@@ -10,9 +10,9 @@ I compile and run this on my linux system
 
 There are 3 major modes:
 
-fit -d path -- dump the file for analysis
-fit -e path -- extract records as plain ascii
-fit -t path -- trim records from end of file
+* fit -d path -- dump the file for analysis
+* fit -e path -- extract records as plain ascii
+* fit -t path -- trim records from end of file
 
 ---------------------
 
