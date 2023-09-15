@@ -526,7 +526,9 @@ struct data {
 };
 
 /* XXX - bogus limit on points */
-struct data data[2000];
+#define MAX_DATA	5000
+
+struct data data[MAX_DATA];
 int ndata = 0;
 
 /* Garmin uses an angular unit the call "semicircles".
@@ -658,6 +660,9 @@ decode ( struct definition *dp )
 	// printf ( "lat = %08x, %d\n", lat, lat );
 
 	// printf ( "   lon, lat, alt = %.5f %.5f %.2f\n", cc2deg(lon), cc2deg(lat), alt );
+
+	if ( ndata >= MAX_DATA )
+	    oops ( "Too much data" );
 
 	data[ndata].time = time;
 	data[ndata].lon = cc2deg(lon);
@@ -980,6 +985,7 @@ void
 dump_file ( void )
 {
 	dump_level = 2;
+	// printf ( "dump file, dump level = %d\n", dump_level );
 	read_file ();
 }
 

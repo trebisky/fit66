@@ -10,9 +10,9 @@ I compile and run this on my linux system
 
 There are 3 major modes:
 
-* fit -d path -- dump the file for analysis
-* fit -e path -- extract records as plain ascii
-* fit -t path -- trim records from end of file
+* fit66 -d path -- dump the file for analysis
+* fit66 -e path -- extract records as plain ascii
+* fit66 -t path -- trim records from end of file
 
 The g66i program (in python, see below) uses "fit -e" to extract data
 from a fit file, which it then relays to my gtopo program for display.
