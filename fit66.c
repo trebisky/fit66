@@ -28,11 +28,13 @@
 
 /* This is the 442 point trimmed version of c.fit
  */
-char *default_path = "/u1/Projects/Garmin/fit66/sample.fit";
+// char *default_path = "/u1/Projects/Garmin/fit66/sample.fit";
 // char *default_path = "/home/tom/c.fit";
 // char *in_path = "/home/tom/c.fit";
 // char *in_path = "trim.fit";
+
 char *in_path;
+char *out_path;
 
 /*
 
@@ -833,9 +835,25 @@ read_file ( void )
 #define TRIM_MAX	300000
 
 u8 trim_buf[TRIM_MAX];
+
+/* byte count of what is in trim_buf */
 int ntrim = 0;
 
-int trim_count;
+// int trim_count;
+
+// ===========
+
+enum trim_state { SKIP, COPY, DONE };
+
+struct trim {
+	int start;
+	int end;
+	enum trim_state state;
+	int skip;
+	int copy;
+};
+
+struct trim trim_info;
 
 void
 trim_append ( u8 *buf, int n )
@@ -847,6 +865,11 @@ trim_append ( u8 *buf, int n )
 	// printf ( "Trim append %d %d\n", n, ntrim );
 }
 
+/* This is called once for every record in the file.
+ * Many of these are not "data records" and should be
+ * just copied.  Only data records are considered for
+ * the trim.
+ */
 int
 trim_record ( int limit )
 {
@@ -855,7 +878,7 @@ trim_record ( int limit )
 	off_t pos;
 	off_t xpos;
 	u8 buf[256];
-	int copy;
+	int do_copy;
 
 	header = peek1 ();
 
@@ -871,12 +894,11 @@ trim_record ( int limit )
 	    trim_append ( buf, nn );
 	    // printf ( "DEF %d\n", nn );
 	    // printf ( "Definition record, global ID = %d -- %s\n", dhdr.g_id, gp->name );
-	    trim_count = 0;
+	    // trim_count = 0;
 	} else {
 	    pos = fit_tell ();
 	    // printf ( "DATAPOS1 = %d\n", pos );
 	    nn = data_record ( &def, 0 );
-	    trim_count++;
 	    //xpos = fit_tell ();
 	    //printf ( "DATAPOS2 = %d\n", xpos );
 
@@ -888,18 +910,44 @@ trim_record ( int limit )
 	    hex_dump ( buf, nn );
     #endif
 
+	    /* Do we copy this record or not?
+	     * If it is not a data record, we copy it.
+	     * We recognize data records by their size of 41 bytes.
+	     *  (this is a bit of a hack XXX )
+	     */
+	    do_copy = 1;
+	    if ( nn == 41 ) {
+		if ( trim_info.state == SKIP ) {
+		    do_copy = 0;
+		    trim_info.skip--;
+		    if ( trim_info.skip == 0 )
+			trim_info.state = COPY;
+		} else if ( trim_info.state == COPY ) {
+		    do_copy = 1;
+		    trim_info.copy--;
+		    if ( trim_info.copy == 0 )
+			trim_info.state = DONE;
+		} else if ( trim_info.state == DONE ) {
+		    do_copy = 0;
+		} else
+		    oops ( "Impossible trim state" );
+	    }
+
+#ifdef notdef
 	    /* XXX - Checking the size is a hackish way to
 	     * identify the records we want.
 	     */
-	    copy = 1;
+	    do_copy = 1;
 
+	    trim_count++;
 	    if ( nn == 41 ) {
 		// printf ( "%d %d of %d\n", nn, trim_count, limit );
 		if ( trim_count > limit )
-		    copy = 0;
+		    do_copy = 0;
 	    }
+#endif
 
-	    if ( copy ) {
+	    if ( do_copy ) {
 		fit_seek ( pos );
 		// printf ( "Copy %d bytes\n", nn );
 		readn ( buf, nn );
@@ -912,17 +960,28 @@ trim_record ( int limit )
 	return nn;
 }
 
-char *trim_path = "trim.fit";
+// char *trim_path = "trim.fit";
+
 int trim_fd;
 
 void
-trim_file ( int limit )
+trim_file ( int start, int end )
 {
 	struct fit_header hdr;
 	int nio;
 	int nrec;
 	int fd;
 	u16 crc;
+
+	trim_info.start = start;
+	trim_info.end = end;
+	trim_info.skip = start - 1;
+	trim_info.copy = end - start + 1;
+
+	if ( trim_info.skip > 0 )
+	    trim_info.state = SKIP;
+	else
+	    trim_info.state = COPY;
 
 	open_fit ();
 
@@ -934,7 +993,8 @@ trim_file ( int limit )
 	// printf ( "Trim: %d data bytes expected\n", nio );
 
 	while ( nio > 0 ) {
-	    nrec = trim_record ( limit );
+	    /* Assume start = 1 for now */
+	    nrec = trim_record ( end );
 	    nio -= nrec;
 	}
 
@@ -968,7 +1028,7 @@ trim_file ( int limit )
 	// crc = calc_crc ( trim_buf, ntrim );
 	// printf ( "Final CRC = %04x\n", crc );
 
-	fd = open ( trim_path, O_CREAT | O_WRONLY | O_TRUNC, 0644 );
+	fd = open ( out_path, O_CREAT | O_WRONLY | O_TRUNC, 0644 );
 	if ( fd < 0 )
 	    oops ( "Cannot open output trim file" );
 	trim_fd = fd;
@@ -1027,12 +1087,19 @@ show_data ( void )
 enum cmd { EXTRACT, DUMP, TRIM };
 
 enum cmd cmd = EXTRACT;
-// enum cmd cmd = TRIM;
+
+char *limits;
 
 void
 usage ( void )
 {
 	oops ( "Usage: fit66 -e path" );
+}
+
+void
+usage_t ( void )
+{
+	oops ( "Usage: fit66 -t sstart:end inpath outpath" );
 }
 
 void
@@ -1062,19 +1129,32 @@ cmdline ( int argc, char **argv )
 	    argv++;
 	}
 
-	if ( argc > 0 )
-	    in_path = *argv;
-}
+	if ( cmd == TRIM ) {
+	    if ( argc != 3 )
+		usage_t ();
 
-#define NTRIM	442
+	    limits = argv[0];
+	    in_path = argv[1];
+	    out_path = argv[2];
+	} else {
+	    if ( argc > 0 )
+		in_path = *argv;
+	    else
+		usage ();
+	}
+}
 
 int
 main ( int argc, char **argv )
 {
+	int start, end;
+	char *xp;
+
 	argc--;
 	argv++;
 
-	in_path = default_path;
+	// in_path = default_path;
+	// in_path = NULL;
 
 	cmdline ( argc, argv );
 
@@ -1090,7 +1170,25 @@ main ( int argc, char **argv )
 	}
 
 	if ( cmd == TRIM ) {
-	    trim_file ( NTRIM );
+	    printf ( "limits: %s\n", limits );
+	    printf ( "in_file: %s\n", in_path );
+	    printf ( "out_file: %s\n", out_path );
+
+	    start = strtol ( limits, &xp, 10 );
+	    // printf ( "xp: %s\n", xp );
+	    if ( *xp != ':' )
+		usage_t ();
+	    xp++;
+	    end = strtol ( xp, NULL, 10 );
+	    // printf ( "start, end = %d %d\n", start, end );
+	    printf ( "trim, keep: %d to %d\n", start, end );
+	    if ( end <= start )
+		usage_t ();
+
+	    // #define NTRIM	442
+	    // trim_file ( 1, NTRIM );
+
+	    trim_file ( start, end );
 	    return 0;
 	}
 

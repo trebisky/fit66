@@ -12,8 +12,11 @@ install: fit66 g66i
 carrie.gpx: carrie.fit
 	gpsbabel -i garmin_fit -f carrie.fit -o gpx -F carrie.gpx
 
+#LATEST = '2023-09-13 16.08.29.fit'
+LATEST = '2023-09-18 20.58.35.fit'
+
 new:
-	cp /u1/Projects/Garmin/Files/Activities/'2023-09-13 16.08.29.fit' new.fit
+	cp /u1/Projects/Garmin/Files/Activities/$(LATEST) new.fit
 
 # THE END
 
